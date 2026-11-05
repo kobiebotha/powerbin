@@ -1,0 +1,1 @@
+# powersync-native-shell-demo
