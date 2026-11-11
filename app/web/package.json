@@ -1,0 +1,17 @@
+{
+  "name": "powerbin-web-sync",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build && powersync-web copy-assets --output dist",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@journeyapps/wa-sqlite": "^2.0.10",
+    "@powersync/web": "^2.6.0"
+  },
+  "devDependencies": {
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}

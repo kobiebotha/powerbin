@@ -1,0 +1,18 @@
+{
+  "name": "powersync-native-shell-demo",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.18.0",
+  "scripts": {
+    "setup": "node scripts/setup-env.mjs",
+    "ps": "node --env-file=.env node_modules/powersync/bin/run.js",
+    "migrate": "pnpm --filter powerbin-server migrate",
+    "test": "pnpm --filter powerbin-server test",
+    "test:integration": "pnpm --filter powerbin-server test:integration",
+    "server": "pnpm --filter powerbin-server start",
+    "web:build": "pnpm --filter powerbin-web-sync build && nsh package app --target web && node scripts/copy-web-assets.mjs"
+  },
+  "devDependencies": {
+    "powersync": "^0.10.3"
+  }
+}

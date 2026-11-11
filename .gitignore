@@ -1,0 +1,10 @@
+.env
+.env.*
+!.env.example
+.tools/
+.cache/
+node_modules/
+target/
+.nsh/
+dist/
+.DS_Store

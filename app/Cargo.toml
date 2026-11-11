@@ -1,0 +1,60 @@
+[package]
+name = "nsh-app-powerbin"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[build-dependencies]
+dotenvy = "0.15"
+
+[dependencies]
+nsh-core = { git = "https://github.com/longbridge/nsh", rev = "e626a8dd8f8d8b277b9507cfd5ac74d0e67020f3" }
+nsh-base = { git = "https://github.com/longbridge/nsh", rev = "e626a8dd8f8d8b277b9507cfd5ac74d0e67020f3" }
+native-shell-crypto = { path = "../crypto" }
+base64 = "0.22"
+futures-lite = "2.6"
+futures-channel = "0.3"
+reqwest = { version = "0.13.2", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+time = { version = "0.3", features = ["formatting", "parsing", "wasm-bindgen"] }
+uuid = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+async-trait = "0.1"
+directories = "6"
+keyring-core = "1"
+env_logger = "0.11"
+powersync = { version = "0.2", features = ["tokio", "reqwest"] }
+rusqlite = { version = "0.39", features = ["bundled"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = "0.3"
+wasm-bindgen = "=0.2.129"
+wasm-bindgen-futures = "0.4"
+serde-wasm-bindgen = "0.6"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = ["Window", "Location", "Storage", "History"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+nsh-platform-linux = { git = "https://github.com/longbridge/nsh", rev = "e626a8dd8f8d8b277b9507cfd5ac74d0e67020f3", default-features = false }
+zbus-secret-service-keyring-store = { version = "1.0.1", features = ["rt-async-io-crypto-rust"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nsh-platform-macos = { git = "https://github.com/longbridge/nsh", rev = "e626a8dd8f8d8b277b9507cfd5ac74d0e67020f3", default-features = false }
+apple-native-keyring-store = { version = "1.0.2", features = ["keychain"] }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+apple-native-keyring-store = { version = "1.0.2", features = ["protected"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-native-keyring-store = "1"
+jni = "0.21"
+jni-verifier = { package = "jni", version = "0.22", default-features = false }
+rustls-platform-verifier = "=0.7.1"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+nsh-platform-windows = { git = "https://github.com/longbridge/nsh", rev = "e626a8dd8f8d8b277b9507cfd5ac74d0e67020f3", default-features = false }

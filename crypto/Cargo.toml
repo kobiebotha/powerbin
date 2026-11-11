@@ -1,0 +1,21 @@
+[package]
+name = "native-shell-crypto"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+chacha20poly1305 = "0.10"
+getrandom = "0.3"
+hkdf = "0.12"
+hmac = "0.12"
+sha2 = "0.10"
+snow = { version = "0.10", default-features = false, features = ["default-resolver-crypto"] }
+x25519-dalek = { version = "2", features = ["static_secrets"] }
+zeroize = "1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.3", features = ["wasm_js"] }
+# Snow's rand_core dependency also uses getrandom 0.2.
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
