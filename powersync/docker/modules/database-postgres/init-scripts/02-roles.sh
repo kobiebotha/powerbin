@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-psql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
+psql --host /var/run/postgresql --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" \
   --set=app_password="$RELAY_APP_PASSWORD" \
   --set=replication_password="$RELAY_REPLICATION_PASSWORD" <<'SQL'
 CREATE USER relay_app WITH PASSWORD :'app_password';
