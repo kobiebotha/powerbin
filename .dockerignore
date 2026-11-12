@@ -9,6 +9,9 @@ app/**
 !app/Cargo.lock
 !app/build.rs
 !app/nsh.json
+!app/App.tsx
+!app/ui/
+!app/ui/**
 !app/src/
 !app/src/**
 !app/web/

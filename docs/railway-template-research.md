@@ -1,8 +1,9 @@
 # Publishing a PowerBin Railway template
 
 Research checked 2026-11-11 against Railway and PowerSync primary sources. This
-note describes a proposed workflow; no Railway project, template, or marketplace
-listing was created or changed.
+note describes the authoring workflow and its current state. A configuration-only
+PowerBin project has been created; no replacement template, running deployment,
+or marketplace publication has been created by this work.
 
 ## Recommendation
 
@@ -60,9 +61,45 @@ The current CLI also supports `railway templates create --project <project>`
 to create an unpublished draft, and `railway templates publish <id>` to publish.
 `railway templates update <id>` updates marketplace metadata on an existing
 listing; it is not documented as replacing its service graph from a new project.
-Use the template editor for infrastructure changes. Keep the original PowerSync
-listing intact and publish PowerBin as a distinct product.
+The existing draft's service graph cannot be replaced with these CLI commands.
+Keep the original PowerSync listing intact and publish PowerBin as a distinct product.
 [CLI template commands](https://docs.railway.com/cli/templates)
+
+## API-only authoring
+
+The PowerSync starter's complete `serializedConfig` was read through the live
+public GraphQL API. Its actual service, variable, networking, and volume format
+is the basis for [railway/template.json](../railway/template.json). The existing
+PowerBin draft supplied by the operator has ID
+`a22b8e33-dd36-455d-9887-1e93d2168810`; no edit has been applied to it.
+
+Live mutation introspection and the
+[official CLI schema](https://raw.githubusercontent.com/railwayapp/cli/master/src/gql/schema.json)
+expose template reading, cloning, generation, publication, and limited volume-size
+editing, but no mutation to replace an existing draft's service graph. The
+connected Railway tools likewise do not expose private-template editing or
+generation. Their connection does not supply credentials to local API scripts.
+
+The proposed API-only alternative is a new configuration project: use
+`templateDeployV2(stageOnly: true)` with the derived configuration, commit its
+staged patch with `environmentPatchCommitStaged(skipDeploys: true)`, restore the
+authored variable defaults with `variableCollectionUpsert(skipDeploys: true)`,
+then call `templateGenerate`. This produces a new draft ID and does not request
+running deployments. The
+[API helper](../railway/template-api.mjs) records progress and checks the exported
+defaults before reporting success. It requires `RAILWAY_API_TOKEN`.
+
+The API token was verified for the PowerSync workspace, and the existing PowerBin
+draft was confirmed to be unpublished and empty. The authoring run created
+[a configuration-only project](https://railway.com/project/8f5b7f87-5f5d-4d1e-88e0-6038a724b7ea),
+but the staging workflow failed because branch `init` was not present in
+`kobiebotha/powersync-native-shell-demo`. The project has no services or deployments.
+The helper now supplies deploy-time variable `value` fields, as Railway's CLI does,
+and polls `workflowStatus` to surface staging failures. It can retry a known failed
+staging operation only after verifying that no services or pending patches remain.
+Literal generator-expression preservation during export remains a required live
+check, not an established result. The operator must push the release branch before
+the API authoring run can continue.
 
 ## Runtime details that matter
 

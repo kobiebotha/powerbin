@@ -2,14 +2,54 @@
 
 This stack has four services: `postgres` (application data), `bucket` (PowerSync
 storage), `powersync`, and `relay` (API plus the packaged Native Shell website).
-Only `relay` and `powersync` need public HTTPS domains. No template has been
-created, published, or deployed.
+Only `relay` and `powersync` need public HTTPS domains. An existing
+[PowerBin draft](https://railway.com/workspace/templates/a22b8e33-dd36-455d-9887-1e93d2168810/settings)
+has been identified; no remote template changes, publication, or deployment have
+been made by this repository's preparation work. A separate
+[configuration-only project](https://railway.com/project/8f5b7f87-5f5d-4d1e-88e0-6038a724b7ea)
+was created through the API; it currently has no services or deployments.
 
 Railway templates are created in the [template composer](https://docs.railway.com/templates/create)
 or generated from an existing project. The Dockerfiles and settings below are
 the inputs to that workflow; this directory is not an invented template manifest.
 Use the eventual published repository/branch for all three GitHub-backed services,
 with the repository root as their root directory. The bucket uses a public image.
+
+[template.json](template.json) is the proposed `serializedConfig`, derived from
+the actual API response for the PowerSync starter. It is configuration data for
+the template API, rather than a file Railway automatically imports from Git.
+The GitHub sources currently use the local `init` branch; make that branch and
+the release sources available before deploying the template.
+
+## API-only draft generation
+
+The public API can read and clone templates or generate a new draft from a
+project, but it has no mutation for replacing an existing draft's service graph.
+The connected Railway app likewise exposes published-template reads and project
+operations, rather than private-template editing or generation.
+
+[template-api.mjs](template-api.mjs) prepares a replacement draft through a new,
+configuration-only project. It stages the four-service configuration, commits it
+with `skipDeploys: true`, restores authored variable expressions, generates a new
+unpublished draft, and compares the exported variable defaults with `template.json`.
+It never publishes or requests a running deployment. On 11 November 2026 the
+API run created the configuration project, but staging stopped because Railway
+could not find the `init` branch on GitHub. Push the committed release branch
+before resuming. Preservation of generator expressions still needs to be confirmed
+by the read-back before considering the draft complete.
+
+```sh
+node railway/template-api.mjs plan
+node railway/template-api.mjs generate --workspace WORKSPACE_ID
+```
+
+Generation requires an account or workspace API token in `RAILWAY_API_TOKEN`,
+supplied through the environment or the ignored root `.env`. A project token is
+insufficient for creating a project and template. Tokens are never printed.
+The script creates a new template ID and leaves the existing draft alone.
+It keeps progress and the exported configuration under ignored `.tools/`; if a
+mutation does not return a saved result, it stops instead of blindly repeating it.
+The configuration project and draft remain available for inspection.
 
 | Service | Source / Dockerfile | Volume | Public port | Health check |
 | --- | --- | --- | --- | --- |
@@ -99,7 +139,7 @@ these public URL entries; keep deployed secrets out of local app builds.
 
 ## Build and verification
 
-The web builder uses Rust 1.99.1, Node 24, pnpm 11.22.0, wasm-bindgen 0.2.129,
+The web builder uses Rust 1.99.1, Node 24, standalone pnpm 12.18.0, wasm-bindgen 0.2.129,
 and the checksum-verified [official NSH 0.4.0 Linux x86_64 SDK](https://github.com/longbridge/nsh/releases/tag/v0.4.0).
 Build Linux amd64; NSH does not provide a Linux ARM64 release archive. Debian
 Trixie provides the GTK 4.14+ and glibc required by NSH's host descriptor.
@@ -108,20 +148,52 @@ site. The strict `.dockerignore` allows source files only: no `.env`, `.tools`,
 local node_modules, generated site, target directory, or private keys enter builds.
 The browser derives its API URL from its own origin; no deployment secrets or
 domain-specific `.env` file are needed to build the site.
+PowerSync uses `journeyapps/powersync-service:latest`. The lockfile
+includes pnpm's platform packages as well as the frozen application dependencies.
+The Docker build includes the current `app/App.tsx` and `app/ui/` views; generated
+Native Shell files are rebuilt inside the image.
 
 ```sh
-docker build --platform linux/amd64 -t relay:local .
-docker build -f railway/postgres.Dockerfile -t relay-postgres:local .
-docker build -f railway/powersync.Dockerfile -t relay-powersync:local .
+docker build --platform linux/amd64 -t powerbin:release .
+docker build --platform linux/amd64 -f railway/postgres.Dockerfile -t powerbin-postgres:release .
+docker build --platform linux/amd64 -f railway/powersync.Dockerfile -t powerbin-powersync:release .
+docker pull postgres:18
 pnpm test
+node railway/smoke.mjs
 ```
 
-All three Dockerfiles built successfully locally, including the Linux amd64
-PowerBin image. An isolated four-service smoke test passed with fresh databases:
+The [release smoke check](smoke.mjs) creates its own labeled containers, network,
+fresh database volumes, signing-key volume, and random loopback ports. It generates
+temporary credentials and removes its resources on completion or failure. It does
+not reuse the development stack. Docker and Node.js 22+ are required. It verifies
+the current TSX entry and descriptor assets, PowerSync workers and SQLite WASM,
+HTTP MIME types, schema/publication/roles, health checks, authenticated bootstrap,
+JWT/JWKS, and signing-key persistence after container replacement. The runtime
+image is also checked for accidentally retained development files or secrets.
+
+With the repository's native Rust prerequisites installed, exercise two real SDK
+clients against the same disposable stack:
+
+```sh
+node railway/smoke.mjs --native
+```
+
+The native fixture uses the supplied disposable database URL and skips the local
+`.env`. Images can be overridden with `SMOKE_RELAY_IMAGE`, `SMOKE_POSTGRES_IMAGE`,
+`SMOKE_POWERSYNC_IMAGE`, and `SMOKE_STORAGE_IMAGE`; by default these are the three
+release tags above and `postgres:18`.
+
+On 11 November 2026, all three release images built successfully for
+Linux amd64, including a frozen pnpm 12.18.0 install and the mixed TSX/Rust/WASM
+frontend. `node railway/smoke.mjs --native` passed against fresh databases:
 
 - Source and storage Postgres initialized; PowerBin and PowerSync health checks passed.
-- The packaged site and worker assets loaded; `/api/keys` exposed only the public
-  key. Authenticated bootstrap/session JWTs verified against that key.
+- The current TSX entry and all descriptor assets were present. All 65 served
+  JavaScript/WASM/manifest/data assets passed HTTP checks, including PowerSync's
+  adapter, workers, and SQLite WASM. No development environment files, private
+  keys, or build toolchains were retained in the runtime image.
+- `/api/keys` exposed only the public key. Bootstrap required authentication and
+  succeeded once; session JWTs verified against that key.
 - Two native SDK clients synced the device directory. A disconnected insert
   stayed local, survived closing and reopening SQLite, and uploaded to Postgres
   and the recipient after reconnecting.
@@ -129,12 +201,17 @@ PowerBin image. An isolated four-service smoke test passed with fresh databases:
   Permanent rejection drained correctly, allowing later uploads and deletion.
 - Replacing the PowerBin container retained the mounted signing key and existing
   device authentication. Key permissions were 0600 inside a 0700 directory.
-- Disposable containers, network, anonymous database volumes, and key files
-  were cleaned up; the existing development stack was left untouched.
+- The disposable containers, network, and database/key volumes were removed;
+  the existing development stack was left untouched.
 
-Browser/macOS pairing, saved snippets, and one-use guest reveal were verified
-separately against the local development stack. No Railway deployment or
-template publication has been performed.
+That smoke run used PowerSync Service 1.25.0. The Dockerfile subsequently returned
+to `latest`; no rebuild or retest was performed for that tag change.
+
+The 17 backend/domain/web/signing-key tests and browser adapter type-check also
+passed. Browser/macOS pairing, saved snippets, and one-use guest reveal were
+verified separately against the local development stack; see the
+[TSX migration validation](../docs/tsx-migration-validation.md). No Railway
+deployment or template publication has been performed.
 
 The layout follows the official [PowerSync Railway starter](https://railway.com/deploy/powersync-starter-postgres)
 and [Postgres bucket-storage example](https://github.com/powersync-ja/self-host-demo/tree/main/demos/nodejs-postgres-bucket-storage),

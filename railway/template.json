@@ -1,0 +1,257 @@
+{
+  "services": {
+    "05ac442e-1afa-44df-a704-e230bb81a4c2": {
+      "icon": "https://devicons.railway.app/i/postgresql.svg",
+      "name": "postgres",
+      "deploy": {
+        "startCommand": null,
+        "healthcheckPath": null
+      },
+      "source": {
+        "repo": "kobiebotha/powersync-native-shell-demo",
+        "branch": "init",
+        "rootDirectory": null
+      },
+      "variables": {
+        "POSTGRES_DB": {
+          "isOptional": false,
+          "description": "Database initialized on a fresh volume",
+          "defaultValue": "relay"
+        },
+        "POSTGRES_USER": {
+          "isOptional": false,
+          "description": "Database initialization user",
+          "defaultValue": "postgres"
+        },
+        "POSTGRES_PASSWORD": {
+          "isOptional": false,
+          "description": "Generated database password",
+          "defaultValue": "${{secret(48)}}"
+        },
+        "PGHOST": {
+          "isOptional": false,
+          "description": "Private database hostname",
+          "defaultValue": "${{RAILWAY_PRIVATE_DOMAIN}}"
+        },
+        "PGPORT": {
+          "isOptional": false,
+          "description": "Database port",
+          "defaultValue": "5432"
+        },
+        "PGUSER": {
+          "isOptional": false,
+          "description": "Database user for the Railway data panel",
+          "defaultValue": "${{POSTGRES_USER}}"
+        },
+        "PGDATABASE": {
+          "isOptional": false,
+          "description": "Database name for the Railway data panel",
+          "defaultValue": "${{POSTGRES_DB}}"
+        },
+        "PGPASSWORD": {
+          "isOptional": false,
+          "description": "Database password for the Railway data panel",
+          "defaultValue": "${{POSTGRES_PASSWORD}}"
+        },
+        "DATABASE_URL": {
+          "isOptional": false,
+          "description": "Private database administration URL",
+          "defaultValue": "postgresql://${{PGUSER}}:${{POSTGRES_PASSWORD}}@${{RAILWAY_PRIVATE_DOMAIN}}:${{PGPORT}}/${{PGDATABASE}}"
+        },
+        "RELAY_APP_PASSWORD": {
+          "isOptional": false,
+          "description": "Generated password for the restricted PowerBin application role",
+          "defaultValue": "${{secret(48)}}"
+        },
+        "RELAY_REPLICATION_PASSWORD": {
+          "isOptional": false,
+          "description": "Generated password for the PowerSync replication role",
+          "defaultValue": "${{secret(48)}}"
+        },
+        "RAILWAY_DOCKERFILE_PATH": {
+          "isOptional": false,
+          "description": "Build the source database with PowerBin schema, roles, publication, and logical replication",
+          "defaultValue": "railway/postgres.Dockerfile"
+        }
+      },
+      "volumeMounts": {
+        "05ac442e-1afa-44df-a704-e230bb81a4c2": {
+          "mountPath": "/var/lib/postgresql"
+        }
+      }
+    },
+    "27ee0456-be8e-47a3-ab6c-6270fdd6eef7": {
+      "icon": "https://devicons.railway.app/i/postgresql.svg",
+      "name": "bucket",
+      "deploy": {
+        "startCommand": null,
+        "healthcheckPath": null
+      },
+      "source": {
+        "image": "postgres:18"
+      },
+      "variables": {
+        "POSTGRES_DB": {
+          "isOptional": false,
+          "description": "Database initialized on a fresh volume",
+          "defaultValue": "powersync"
+        },
+        "POSTGRES_USER": {
+          "isOptional": false,
+          "description": "Database initialization user",
+          "defaultValue": "powersync"
+        },
+        "POSTGRES_PASSWORD": {
+          "isOptional": false,
+          "description": "Generated database password",
+          "defaultValue": "${{secret(48)}}"
+        },
+        "PGHOST": {
+          "isOptional": false,
+          "description": "Private database hostname",
+          "defaultValue": "${{RAILWAY_PRIVATE_DOMAIN}}"
+        },
+        "PGPORT": {
+          "isOptional": false,
+          "description": "Database port",
+          "defaultValue": "5432"
+        },
+        "PGUSER": {
+          "isOptional": false,
+          "description": "Database user for the Railway data panel",
+          "defaultValue": "${{POSTGRES_USER}}"
+        },
+        "PGDATABASE": {
+          "isOptional": false,
+          "description": "Database name for the Railway data panel",
+          "defaultValue": "${{POSTGRES_DB}}"
+        },
+        "PGPASSWORD": {
+          "isOptional": false,
+          "description": "Database password for the Railway data panel",
+          "defaultValue": "${{POSTGRES_PASSWORD}}"
+        },
+        "DATABASE_URL": {
+          "isOptional": false,
+          "description": "Private database administration URL",
+          "defaultValue": "postgresql://${{PGUSER}}:${{POSTGRES_PASSWORD}}@${{RAILWAY_PRIVATE_DOMAIN}}:${{PGPORT}}/${{PGDATABASE}}"
+        }
+      },
+      "volumeMounts": {
+        "27ee0456-be8e-47a3-ab6c-6270fdd6eef7": {
+          "mountPath": "/var/lib/postgresql"
+        }
+      }
+    },
+    "1e2da649-2d1b-4b37-bcc5-deab08815f0d": {
+      "icon": "https://journeyapps.com/assets/images/powersync-railway/powersync-logo-icon.png",
+      "name": "powersync",
+      "deploy": {
+        "startCommand": null,
+        "healthcheckPath": "/probes/startup"
+      },
+      "source": {
+        "repo": "kobiebotha/powersync-native-shell-demo",
+        "branch": "init",
+        "rootDirectory": null
+      },
+      "networking": {
+        "serviceDomains": {
+          "<hasDomain>": {}
+        }
+      },
+      "variables": {
+        "PORT": {
+          "isOptional": false,
+          "description": "PowerSync HTTP port",
+          "defaultValue": "8080"
+        },
+        "RAILWAY_DOCKERFILE_PATH": {
+          "isOptional": false,
+          "description": "Build the latest PowerSync Service with PowerBin configuration and Sync Streams",
+          "defaultValue": "railway/powersync.Dockerfile"
+        },
+        "PS_DATA_SOURCE_URI": {
+          "isOptional": false,
+          "description": "Private source database connection using the replication role",
+          "defaultValue": "postgresql://relay_sync:${{postgres.RELAY_REPLICATION_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/relay"
+        },
+        "PS_STORAGE_SOURCE_URI": {
+          "isOptional": false,
+          "description": "Private PowerSync storage database connection",
+          "defaultValue": "postgresql://powersync:${{bucket.POSTGRES_PASSWORD}}@${{bucket.RAILWAY_PRIVATE_DOMAIN}}:5432/powersync"
+        },
+        "PS_JWKS_URI": {
+          "isOptional": false,
+          "description": "PowerBin public signing keys over the private network",
+          "defaultValue": "http://${{relay.RAILWAY_PRIVATE_DOMAIN}}:8080/api/keys"
+        },
+        "PS_ADMIN_TOKEN": {
+          "isOptional": false,
+          "description": "Generated PowerSync administration API token",
+          "defaultValue": "${{secret(48)}}"
+        }
+      }
+    },
+    "311b006c-43ca-4a53-ae9d-9ff747fb7cda": {
+      "icon": "https://devicons.railway.app/node",
+      "name": "relay",
+      "deploy": {
+        "startCommand": null,
+        "healthcheckPath": "/health"
+      },
+      "source": {
+        "repo": "kobiebotha/powersync-native-shell-demo",
+        "branch": "init",
+        "rootDirectory": null
+      },
+      "networking": {
+        "serviceDomains": {
+          "<hasDomain>": {}
+        }
+      },
+      "volumeMounts": {
+        "311b006c-43ca-4a53-ae9d-9ff747fb7cda": {
+          "mountPath": "/data"
+        }
+      },
+      "variables": {
+        "PORT": {
+          "isOptional": false,
+          "description": "PowerBin API and browser app HTTP port",
+          "defaultValue": "8080"
+        },
+        "HOST": {
+          "isOptional": false,
+          "description": "Listen on IPv6 and IPv4 for Railway private networking",
+          "defaultValue": "::"
+        },
+        "DATABASE_URL": {
+          "isOptional": false,
+          "description": "Private source database connection using the restricted application role",
+          "defaultValue": "postgresql://relay_app:${{postgres.RELAY_APP_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/relay"
+        },
+        "API_ORIGIN": {
+          "isOptional": false,
+          "description": "Public PowerBin origin used as the session JWT issuer",
+          "defaultValue": "https://${{RAILWAY_PUBLIC_DOMAIN}}"
+        },
+        "POWERSYNC_URL": {
+          "isOptional": false,
+          "description": "Public HTTPS endpoint used by PowerSync clients",
+          "defaultValue": "https://${{powersync.RAILWAY_PUBLIC_DOMAIN}}"
+        },
+        "BOOTSTRAP_TOKEN": {
+          "isOptional": false,
+          "description": "Retrieve this generated token from Railway variables to initialize the first PowerBin device",
+          "defaultValue": "${{secret(48)}}"
+        },
+        "JWT_PRIVATE_JWK_FILE": {
+          "isOptional": false,
+          "description": "Generate and preserve the private signing key on the mounted volume",
+          "defaultValue": "/data/signing-key.json"
+        }
+      }
+    }
+  }
+}

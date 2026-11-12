@@ -5,7 +5,11 @@ COPY --from=node /usr/local/ /usr/local/
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgtk-4-dev libssl-dev pkg-config clang llvm libclang-dev \
     && rm -rf /var/lib/apt/lists/*
-RUN corepack enable pnpm && corepack prepare pnpm@11.22.0 --activate
+ENV PNPM_HOME=/opt/pnpm
+ENV PATH="/opt/pnpm/bin:${PATH}"
+RUN curl -fsSL https://get.pnpm.io/install.sh -o /tmp/install-pnpm.sh \
+    && PNPM_VERSION=12.18.0 PNPM_NO_MODIFY_PATH=1 SHELL=/bin/sh sh /tmp/install-pnpm.sh \
+    && rm /tmp/install-pnpm.sh
 RUN rustup target add wasm32-unknown-unknown \
     && cargo install wasm-bindgen-cli --version 0.2.129 --locked
 # Official NSH 0.4.0 (e626a8d) ships a Linux x86_64 SDK, including its host descriptor.

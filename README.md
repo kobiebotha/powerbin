@@ -14,7 +14,8 @@ commands back to the Rust core.
 
 ## Run locally
 
-Prerequisites: Node.js 22.12+, pnpm, Docker with Compose 2.20.3+, Rust stable (validated
+Prerequisites: Node.js 22.12+, pnpm 12.18.0 installed with its standalone installer
+or Homebrew, Docker with Compose 2.20.3+, Rust stable (validated
 with 1.99.1), and the Native Shell 0.4 CLI. macOS builds need Xcode command-line
 tools. Browser packaging also needs the `wasm32-unknown-unknown` Rust target
 and `wasm-bindgen-cli` exactly 0.2.129, plus LLVM `clang` with WebAssembly support

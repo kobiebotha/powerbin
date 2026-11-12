@@ -410,7 +410,7 @@ import pg from 'pg';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { hash } from './src/domain.js';
-if (existsSync('../.env')) process.loadEnvFile('../.env');
+if (!process.env.MIGRATION_DATABASE_URL && !process.env.DATABASE_URL && existsSync('../.env')) process.loadEnvFile('../.env');
 const pool = new pg.Pool({ connectionString: process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL });
 const input = JSON.parse(await new Response(process.stdin).text());
 const op = process.argv[1];
