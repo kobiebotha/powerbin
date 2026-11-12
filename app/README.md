@@ -56,6 +56,11 @@ queries. The controller uses those operations directly. Pairing approval and
 one-use guest reveals use explicit backend endpoints; a guest reveal does not
 open the browser's synced database.
 
+Browser sync uses PowerSync's WebSocket transport. This avoids the streaming
+`fetch()` path where [WebKit can withhold an update until another chunk arrives](https://bugs.webkit.org/show_bug.cgi?id=322545).
+On a quiet HTTP sync stream, the next chunk can be the service's 18–22 second
+heartbeat. The local watched snapshot still reads items and devices atomically.
+
 ## Browser build
 
 The mixed runtime links native dependencies such as zstd into WebAssembly.

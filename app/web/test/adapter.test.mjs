@@ -165,8 +165,8 @@ async function harness(t, { items = [], devices = [] } = {}) {
   ]) TestDatabase.prototype[method] = sdk.PowerSyncDatabase.prototype[method];
 
   const context = createContext({ console, URL, setTimeout, clearTimeout, AbortController });
-  const web = new SyntheticModule(['column', 'PowerSyncDatabase', 'Schema', 'Table', 'WASQLiteVFS'], function () {
-    for (const key of ['column', 'Schema', 'Table', 'WASQLiteVFS']) this.setExport(key, sdk[key]);
+  const web = new SyntheticModule(['column', 'PowerSyncDatabase', 'Schema', 'SyncStreamConnectionMethod', 'Table', 'WASQLiteVFS'], function () {
+    for (const key of ['column', 'Schema', 'SyncStreamConnectionMethod', 'Table', 'WASQLiteVFS']) this.setExport(key, sdk[key]);
     this.setExport('PowerSyncDatabase', TestDatabase);
   }, { context });
   const vault = new SyntheticModule(['load', 'save', 'copy'], function () {

@@ -1,4 +1,4 @@
-import { column, PowerSyncDatabase, Schema, Table, WASQLiteVFS } from '@powersync/web';
+import { column, PowerSyncDatabase, Schema, SyncStreamConnectionMethod, Table, WASQLiteVFS } from '@powersync/web';
 import type { PowerSyncBackendConnector } from '@powersync/web';
 export { load, save, copy } from './vault';
 
@@ -200,7 +200,11 @@ async function open(config: Config): Promise<void> {
   // Watch errors also reach subscribers through emit(), even when nobody is
   // awaiting the initial snapshot.
   void firstRows.catch(() => {});
-  void local.connect(connector).catch(report);
+  // WebKit can withhold fetch-stream data until the next chunk (the service's
+  // 18–22 second heartbeat). WebSocket frames bypass that HTTP buffering path.
+  void local.connect(connector, {
+    connectionMethod: SyncStreamConnectionMethod.WEB_SOCKET
+  }).catch(report);
 }
 
 export async function snapshot(): Promise<Snapshot> {
