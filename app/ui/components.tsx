@@ -1,6 +1,6 @@
 import { type Accessor, type JSX, type ViewStyle, Text, View } from "nsh";
 import { Button, Input } from "nsh/base";
-import { PowerBin, type UiState, type Field as FieldName, type CommandName as ActionName } from "relay/native";
+import { PowerBin, type UiState, type Field as FieldName, type CommandName as ActionName } from "powerbin/native";
 
 export type State = Accessor<UiState>;
 export type { FieldName, ActionName };
@@ -29,10 +29,12 @@ export function Panel(props: { children: JSX.Element; style?: ViewStyle }) {
   }, props.style]}>{props.children}</View>;
 }
 
-export function Heading(props: { title: string; subtitle: string }) {
+export function Heading(props: { title: string; subtitle?: string }) {
   return <View style={{ gap: 8 }}>
     <Text style={{ ...mono, fontSize: 25, fontWeight: "500", color: color.accent }}>{props.title}</Text>
-    <Text style={{ ...mono, fontSize: 13, color: color.muted, lineHeight: 20 }}>{props.subtitle}</Text>
+    <If when={!!props.subtitle}>
+      <Text style={{ ...mono, fontSize: 13, color: color.muted, lineHeight: 20 }}>{props.subtitle}</Text>
+    </If>
   </View>;
 }
 

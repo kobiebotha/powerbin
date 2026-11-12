@@ -1,6 +1,6 @@
 use crate::model::{Device, GuestView, Item, PairingView, Session};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
-use native_shell_crypto::{self as crypto, DirectedPurpose, Key, KeyPair};
+use native_shell_crypto::{self as crypto, DirectedPurpose, Key, KeyPair, PublicKey};
 use nsh_core::prelude::*;
 use serde::{Deserialize, de::DeserializeOwned};
 use serde_json::{Value, json};
@@ -125,7 +125,7 @@ impl Controller {
             error: signal(String::new()),
             busy: signal(true),
             origin: signal(
-                option_env!("RELAY_API_ORIGIN")
+                option_env!("POWERBIN_API_ORIGIN")
                     .map(str::to_owned)
                     .unwrap_or_else(crate::platform::web_origin),
             ),
@@ -345,7 +345,7 @@ impl Controller {
                 .ok_or("Sender is not trusted")?;
             crypto::open_directed(
                 &KeyPair::from_private(key(&session.private_key)?),
-                &key(&sender.public_key)?,
+                &public_key(&sender.public_key)?,
                 DirectedPurpose::Transfer { item_id: &item.id },
                 &payload,
             )
@@ -360,6 +360,7 @@ impl Controller {
     }
 
     async fn restore(&self, mut session: Session) -> Result<(), String> {
+        session.validate_crypto_version()?;
         if session.powersync_endpoint.is_empty() {
             self.ui.origin.set(session.origin.clone());
             self.ui.name.set(session.name.clone());
@@ -372,6 +373,7 @@ impl Controller {
     }
 
     async fn open(&self, session: Session) -> Result<(), String> {
+        session.validate_crypto_version()?;
         if self
             .ui
             .session
@@ -485,6 +487,7 @@ impl Controller {
         }
         let private = crypto::random_key().map_err(show)?;
         Ok(Session {
+            crypto_version: crypto::PROTOCOL_VERSION,
             origin,
             powersync_endpoint: String::new(),
             device_id: new_id()?,
@@ -610,7 +613,7 @@ impl Controller {
             .read(&B64.decode(&last.messages[2]).map_err(show)?)
             .map_err(show)?;
         let peer = handshake.finish().map_err(show)?;
-        if peer.remote_public_key != key(&entry.public_key)? {
+        if peer.remote_public_key != public_key(&entry.public_key)? {
             return Err("Pairing identity changed".into());
         }
         self.show_pairing(PendingPairing {
@@ -699,7 +702,7 @@ impl Controller {
             )
             .map_err(show)?;
             let _: Value = request(&session.origin, &session.device_token, &format!("/api/pairings/{}/approve", pending.id),
-                Some(json!({ "public_key": B64.encode(pending.peer.remote_public_key), "shared_key_envelope": B64.encode(envelope),
+                Some(json!({ "public_key": B64.encode(&pending.peer.remote_public_key), "shared_key_envelope": B64.encode(envelope),
                     "admission": admission(&pending.peer_device_id, &pending.peer_name, &pending.peer.remote_public_key, &group)? }))).await?;
         } else {
             self.ui
@@ -772,11 +775,12 @@ impl Controller {
             return Ok(());
         }
         let id = new_id()?;
+        let now = OffsetDateTime::now_utc();
         let mut item = Item {
             id: id.clone(),
             kind: kind.into(),
             sender_id: session.device_id.clone(),
-            created_at: stamp(OffsetDateTime::now_utc()),
+            created_at: stamp(now),
             ..Default::default()
         };
         let ciphertext = match kind {
@@ -785,7 +789,7 @@ impl Controller {
             }
             "link" => {
                 let guest = crypto::create_guest(&id, text.as_bytes()).map_err(show)?;
-                item.expires_at = Some(stamp(OffsetDateTime::now_utc() + time::Duration::hours(1)));
+                item.expires_at = Some(stamp(now + time::Duration::hours(48)));
                 item.payload = Some(B64.encode(guest.ciphertext));
                 let result: Value = request(&session.origin, &session.device_token, "/api/upload",
                     Some(json!({ "batch": [{ "op": "PUT", "table": "items", "id": id, "opData": item }] }))).await?;
@@ -799,7 +803,7 @@ impl Controller {
                 ));
                 self.ui
                     .status
-                    .set("Link ready · one reveal · expires in an hour".into());
+                    .set("Link ready · one reveal · expires in 48 hours".into());
                 self.ui.draft.set(String::new());
                 return Ok(());
             }
@@ -933,6 +937,11 @@ fn key(value: &str) -> Result<Key, String> {
         .map_err(|_| "Invalid key length".into())
 }
 
+fn public_key(value: &str) -> Result<PublicKey, String> {
+    let bytes = B64.decode(value).map_err(show)?;
+    PublicKey::from_bytes(&bytes).map_err(show)
+}
+
 fn without_locally_revoked(
     mut devices: Vec<Device>,
     locally_revoked: &HashSet<String>,
@@ -962,7 +971,7 @@ fn prepare_rename(
     target.admission = Some(admission(
         &target.id,
         &target.name,
-        &key(&target.public_key)?,
+        &public_key(&target.public_key)?,
         &key(&session.group_key)?,
     )?);
     Ok(target)
@@ -1038,7 +1047,7 @@ fn verified_devices(session: &Session, devices: Vec<Device>) -> Vec<Device> {
     devices
         .into_iter()
         .filter(|device| {
-            let (Ok(public), Some(tag)) = (key(&device.public_key), &device.admission) else {
+            let (Ok(public), Some(tag)) = (public_key(&device.public_key), &device.admission) else {
                 return false;
             };
             let Ok(tag) = B64.decode(tag) else {
@@ -1096,7 +1105,7 @@ fn prepare_transfers(
             let id = new_id()?;
             let ciphertext = crypto::seal_directed(
                 &sender,
-                &key(&recipient.public_key)?,
+                &public_key(&recipient.public_key)?,
                 DirectedPurpose::Transfer { item_id: &id },
                 text.as_bytes(),
             )
@@ -1159,7 +1168,7 @@ fn identity(session: &Session, keys: &KeyPair) -> Value {
     json!({ "device_id": session.device_id, "name": session.name,
         "public_key": B64.encode(keys.public_key()), "device_token": session.device_token })
 }
-fn admission(id: &str, name: &str, public_key: &Key, group: &Key) -> Result<String, String> {
+fn admission(id: &str, name: &str, public_key: &PublicKey, group: &Key) -> Result<String, String> {
     Ok(B64.encode(
         crypto::device_admission(
             group,
@@ -1181,6 +1190,7 @@ mod tests {
 
     fn session() -> Session {
         Session {
+            crypto_version: crypto::PROTOCOL_VERSION,
             origin: "http://localhost:18088".into(),
             powersync_endpoint: "http://localhost:18080".into(),
             device_id: "sender".into(),

@@ -2,7 +2,7 @@
 // secret values are displayed; edits affect only this engine's form state.
 import { cleanup, mount, signal, Text, View } from "nsh";
 import { Button } from "nsh/base";
-import { PowerBin, type UiState } from "relay/native";
+import { PowerBin, type UiState } from "powerbin/native";
 
 function Observer() {
   const state = signal<UiState | undefined>();

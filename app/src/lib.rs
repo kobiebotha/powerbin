@@ -17,7 +17,7 @@ mod schema;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage_native;
 
-#[native_module("relay/native")]
+#[native_module("powerbin/native")]
 fn native(registry: &mut Registry) {
     registry.module::<bridge::PowerBin>();
 }

@@ -9,7 +9,7 @@ import { migrate } from '../src/migrate.js';
 
 test('device authorization and transfer lifecycle', { skip: !process.env.TEST_DATABASE_URL }, async t => {
   const admin = new pg.Pool({ connectionString: process.env.TEST_DATABASE_URL });
-  const schema = `relay_test_${randomBytes(6).toString('hex')}`;
+  const schema = `powerbin_test_${randomBytes(6).toString('hex')}`;
   await admin.query(`CREATE SCHEMA ${schema}`);
   const pool = new pg.Pool({ connectionString: process.env.TEST_DATABASE_URL, options: `-c search_path=${schema}` });
   let server;
@@ -22,7 +22,7 @@ test('device authorization and transfer lifecycle', { skip: !process.env.TEST_DA
   await migrate(pool);
   const { privateKey } = await generateKeyPair('EdDSA', { extractable: true });
   const setupToken = randomBytes(32).toString('base64url');
-  const issuer = 'https://relay.test';
+  const issuer = 'https://powerbin.test';
   server = await createServer({ pool, bootstrapToken: setupToken, privateJwk: await exportJWK(privateKey), powersyncUrl: 'https://sync.test', issuer });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
@@ -150,9 +150,13 @@ test('device authorization and transfer lifecycle', { skip: !process.env.TEST_DA
   });
 
   await t.test('guest GET does not consume and concurrent reveals return ciphertext at most once', async () => {
-    const item = mutation(mac, { kind: 'link', recipient_id: null });
-    await upload(mac, item);
-    assert.equal((await request(`/api/links/${item.id}`)).status, 200);
+    const createdAt = Date.now() - 2 * 60 * 60_000;
+    const item = mutation(mac, { kind: 'link', recipient_id: null, created_at: new Date(createdAt).toISOString(),
+      expires_at: new Date(createdAt + 48 * 60 * 60_000).toISOString() });
+    assert.equal((await upload(mac, item)).body.accepted, true);
+    const metadata = await request(`/api/links/${item.id}`);
+    assert.equal(metadata.status, 200);
+    assert.equal(metadata.body.expires_at, item.opData.expires_at);
     assert.equal((await request(`/api/links/${item.id}`)).status, 200);
     const results = await Promise.all([
       request(`/api/links/${item.id}/reveal`, { method: 'POST' }),
@@ -165,7 +169,7 @@ test('device authorization and transfer lifecycle', { skip: !process.env.TEST_DA
   });
 
   await t.test('expired offline uploads never persist their ciphertext', async () => {
-    const item = mutation(mac, { kind: 'link', recipient_id: null, created_at: new Date(Date.now() - 2 * 60 * 60_000).toISOString() });
+    const item = mutation(mac, { kind: 'link', recipient_id: null, created_at: new Date(Date.now() - 49 * 60 * 60_000).toISOString() });
     assert.equal((await upload(mac, item)).body.accepted, true);
     const { rows } = await pool.query('SELECT payload, burn_reason FROM items WHERE id = $1', [item.id]);
     assert.equal(rows[0].payload, null);

@@ -123,7 +123,7 @@ export async function createServer({ pool, bootstrapToken, privateJwk, powersync
   if (bootstrapToken.length < 32) throw new Error('BOOTSTRAP_TOKEN must be a high-entropy secret of at least 32 characters');
   if (privateJwk.kty !== 'OKP' || privateJwk.crv !== 'Ed25519' || !privateJwk.d) throw new Error('JWT_PRIVATE_JWK must be a private Ed25519 JWK');
   const signingKey = await importJWK(privateJwk, 'EdDSA');
-  const publicJwk = { kty: 'OKP', crv: 'Ed25519', x: privateJwk.x, alg: 'EdDSA', use: 'sig', kid: privateJwk.kid || 'relay' };
+  const publicJwk = { kty: 'OKP', crv: 'Ed25519', x: privateJwk.x, alg: 'EdDSA', use: 'sig', kid: privateJwk.kid || 'powerbin' };
   const origins = new Set([new URL(issuer).origin, ...allowedOrigins]);
   const attempts = new Map();
   const serveWeb = webDist ? await webFiles(webDist) : null;

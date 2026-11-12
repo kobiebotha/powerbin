@@ -68,6 +68,22 @@ test('retaining a snippet requires the explicit saved kind', () => {
   assert.throws(() => itemInput(transfer({ kind: 'saved', recipient_id: null, expires_at: new Date(now).toISOString() }), sender, now), /do not expire/);
 });
 
+test('one-time links expire 48 hours after creation, including delayed uploads', () => {
+  const createdAt = new Date(now).toISOString();
+  const expiry = now + 48 * 60 * 60 * 1000;
+  const link = transfer({ kind: 'link', recipient_id: null, created_at: createdAt });
+  const fresh = itemInput(link, sender, now);
+  assert.equal(fresh.expiresAt, new Date(expiry).toISOString());
+  assert.equal(fresh.expired, false);
+  assert.equal(itemInput(link, sender, expiry - 1).payload, 'encrypted envelope');
+  const expired = itemInput(link, sender, expiry);
+  assert.equal(expired.expired, true);
+  assert.equal(expired.payload, null);
+  assert.equal(itemInput(transfer({ ...link.opData, expires_at: new Date(expiry).toISOString() }), sender, now).expiresAt,
+    new Date(expiry).toISOString());
+  assert.throws(() => itemInput(transfer({ ...link.opData, expires_at: new Date(expiry + 1).toISOString() }), sender, now), /expiry/);
+});
+
 test('pairing code entry tolerates grouping without accepting arbitrary identifiers', () => {
   assert.equal(normalizeCode(' a1b2c-d3e4f '), 'A1B2CD3E4F');
   assert.throws(() => normalizeCode('short'), Rejected);

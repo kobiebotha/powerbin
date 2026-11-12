@@ -8,8 +8,8 @@ the Rust core to WebAssembly. The browser's small TypeScript adapter supplies
 the PowerSync Web SDK and browser storage/clipboard operations.
 
 The [Rust bridge](src/bridge.rs) exports the display state and commands through
-`relay/native`; NSH generates TypeScript declarations under
-`.nsh/types/relay/native.d.ts`. Its change subscription pushes updates into TSX
+`powerbin/native`; NSH generates TypeScript declarations under
+`.nsh/types/powerbin/native.d.ts`. Its change subscription pushes updates into TSX
 signals without polling. The controller owns the session, encryption, and
 PowerSync connection; private keys and device tokens are not view state.
 
@@ -34,8 +34,12 @@ The build reads the public `API_ORIGIN` and `WEB_ORIGIN` values from the root
 use origin-local IndexedDB. No secret-storage fallback writes them to plaintext
 files.
 
-PowerBin retains the original app and storage identifiers so existing paired
-devices and encrypted snippets continue working across the rename.
+The app ID, native credential-store service, and local database names use
+PowerBin. Builds using the previous identifiers keep separate app data and
+credentials; pair devices again when switching to this build. Existing encrypted
+snippets require the original device keys and are not migrated automatically.
+Keep an already paired client available to approve the new device identities;
+an initialized backend cannot bootstrap another first device.
 
 ## Read the integration
 

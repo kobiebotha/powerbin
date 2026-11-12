@@ -3,13 +3,15 @@
 Validated 9 November 2026 against the pinned Native Shell revision
 `e626a8dd8f8d8b277b9507cfd5ac74d0e67020f3` and the existing local backend stack.
 The earlier Rust-root results remain historical evidence in the root README.
+These results predate the later PowerBin identifier rename and do not verify
+migration of existing stored identities into the new namespaces.
 
 ## Implementation
 
 - `app/App.tsx` and `app/ui/` contain the shared Native Shell TSX views. The
   previous Rust view module and direct Rust-root desktop binary were removed.
 - `app/src/bridge.rs` exports generated display-state, field, and command types
-  under the existing `relay/native` module. Session keys and device credentials
+  under the native module (now `powerbin/native`). Session keys and device credentials
   stay in Rust. Rust watches push snapshots; there is no TSX-to-Rust polling.
 - A VM-local core task owns one controller and its reactive root. Subscriptions
   receive initial state, release their callbacks on unsubscribe/owner cleanup,

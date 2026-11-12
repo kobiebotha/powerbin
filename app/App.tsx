@@ -1,6 +1,6 @@
 import { cleanup, mount, Scroll, signal, Text, View, windowSize } from "nsh";
 import { Button } from "nsh/base";
-import { PowerBin, type UiState } from "relay/native";
+import { PowerBin, type UiState } from "powerbin/native";
 import { color, focus, mono, Panel, setField, small, type State } from "./ui/components";
 import { Guest } from "./ui/guest";
 import { Setup } from "./ui/pairing";

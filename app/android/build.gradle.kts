@@ -6,12 +6,12 @@ val nshApi by tasks.registering(Sync::class) {
     into(layout.buildDirectory.dir("nsh-api"))
 }
 android {
-    namespace = "dev.powersync.relay"
+    namespace = "dev.powersync.powerbin"
     compileSdk = 35
     buildToolsVersion = "35.0.1"
     signingConfigs.getByName("debug") { storeFile = file("../../.tools/android-validation/debug.keystore") }
     defaultConfig {
-        applicationId = "dev.powersync.relay"
+        applicationId = "dev.powersync.powerbin"
         minSdk = 28
         targetSdk = 35
         versionCode = 1

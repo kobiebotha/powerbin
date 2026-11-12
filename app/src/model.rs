@@ -27,6 +27,8 @@ pub struct Device {
 // hashed bearer token, and an encrypted group-key grant.
 #[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
+    #[serde(default)]
+    pub crypto_version: u8,
     pub origin: String,
     pub powersync_endpoint: String,
     pub device_id: String,
@@ -34,6 +36,15 @@ pub struct Session {
     pub private_key: String,
     pub device_token: String,
     pub group_key: String,
+}
+
+impl Session {
+    pub fn validate_crypto_version(&self) -> Result<(), String> {
+        if self.crypto_version != native_shell_crypto::PROTOCOL_VERSION {
+            return Err("This session uses an older encryption protocol. Set up a fresh post-quantum group; existing keys and data have been retained.".into());
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Default, PartialEq, Serialize, Deserialize, nsh_core::prelude::JsObject)]

@@ -38,6 +38,10 @@ export function Setup(props: { state: State }) {
         <Panel>
           <Text style={{ ...mono, fontSize: 16, fontWeight: "600", color: color.ink }}>First device?</Text>
           <Field label="Setup token" placeholder="Your installation’s setup token" field="bootstrapToken" state={props.state} masked />
+          <View style={{ gap: 8 }}>
+            <Text style={{ ...small, lineHeight: 19 }}>On Railway, open your project, select the powerbin service, then copy BOOTSTRAP_TOKEN from the Variables tab.</Text>
+            <Text style={{ ...small, lineHeight: 19 }}>Running locally? Copy BOOTSTRAP_TOKEN from the project’s .env file, created by pnpm run setup.</Text>
+          </View>
           <Action label="Create my PowerBin" state={props.state} action="bootstrap" />
         </Panel>
       </View>

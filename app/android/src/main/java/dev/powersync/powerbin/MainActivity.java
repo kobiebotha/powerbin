@@ -1,4 +1,4 @@
-package dev.powersync.relay;
+package dev.powersync.powerbin;
 
 import android.app.Activity;
 import android.content.Context;

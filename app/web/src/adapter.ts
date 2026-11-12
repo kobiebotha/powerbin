@@ -159,7 +159,7 @@ async function open(config: Config): Promise<void> {
   const local = new PowerSyncDatabase({
     schema,
     database: {
-      dbFilename: config.db_filename || `relay-${config.device_id}.db`,
+      dbFilename: config.db_filename || `powerbin-${config.device_id}.db`,
       vfs: WASQLiteVFS.OPFSCoopSyncVFS,
       worker
     },

@@ -45,7 +45,7 @@ impl Fixture {
         let mut fixture: Self =
             serde_json::from_value(node("setup", json!({}))?).map_err(|e| e.to_string())?;
         fixture.directory =
-            std::env::temp_dir().join(format!("relay-smoke-{}", fixture.transfer_id));
+            std::env::temp_dir().join(format!("powerbin-smoke-{}", fixture.transfer_id));
         std::fs::create_dir(&fixture.directory).map_err(|e| e.to_string())?;
         Ok(fixture)
     }

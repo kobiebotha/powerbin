@@ -1,4 +1,4 @@
-name: relay
+name: powerbin
 _type: self-hosted
 port: 8080
 replication:

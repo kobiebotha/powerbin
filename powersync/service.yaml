@@ -1,4 +1,4 @@
-name: relay-local
+name: powerbin-local
 _type: self-hosted
 port: !env PS_PORT::number
 
@@ -24,7 +24,7 @@ client_auth:
         crv: Ed25519
         alg: EdDSA
         use: sig
-        kid: relay
+        kid: powerbin
         x: !env PS_JWT_PUBLIC_X
 
 api:

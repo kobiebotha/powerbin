@@ -14,10 +14,10 @@ if (process.argv.slice(2).some(arg => arg !== '--native')) {
   process.exit(2);
 }
 const prefix = `powerbin-smoke-${process.pid}-${randomBytes(4).toString('hex')}`;
-const names = Object.fromEntries(['postgres', 'bucket', 'powersync', 'relay'].map(name => [name, `${prefix}-${name}`]));
+const names = Object.fromEntries(['postgres', 'bucket', 'powersync', 'powerbin'].map(name => [name, `${prefix}-${name}`]));
 const volumes = ['postgres', 'bucket', 'keys'].map(name => `${prefix}-${name}`);
 const images = {
-  relay: process.env.SMOKE_RELAY_IMAGE || 'powerbin:release',
+  powerbin: process.env.SMOKE_POWERBIN_IMAGE || 'powerbin:release',
   postgres: process.env.SMOKE_POSTGRES_IMAGE || 'powerbin-postgres:release',
   powersync: process.env.SMOKE_POWERSYNC_IMAGE || 'powerbin-powersync:release',
   bucket: process.env.SMOKE_STORAGE_IMAGE || 'postgres:18'
@@ -94,8 +94,8 @@ async function checkSite(origin) {
   const descriptor = JSON.parse(html.match(/const app = (\{[^\n]+\});/)?.[1] || 'null');
   assert.ok(descriptor?.code && descriptor.rust === false, 'Packaged entry is the current mixed TSX app');
   const code = await fetch(`${origin}/${descriptor.code}`).then(response => response.text());
-  assert.ok(code.includes('relay/native') && code.includes('PowerBin'), 'TSX bundle contains the Rust bridge');
-  const files = JSON.parse(await docker(['exec', names.relay, 'node', '--input-type=module', '-e',
+  assert.ok(code.includes('powerbin/native') && code.includes('PowerBin'), 'TSX bundle contains the Rust bridge');
+  const files = JSON.parse(await docker(['exec', names.powerbin, 'node', '--input-type=module', '-e',
     "import { readdir } from 'node:fs/promises'; const root='/app/public'; const files=[]; async function walk(path='') { for(const e of await readdir(root+'/'+path,{withFileTypes:true})) { const name=path+e.name; if(e.isDirectory()) await walk(name+'/'); else files.push(name); } } await walk(); console.log(JSON.stringify(files));"]));
   const references = new Set([
     'manifest.webmanifest', descriptor.code, descriptor.wasm, descriptor.glue, descriptor.host,
@@ -122,7 +122,7 @@ async function checkSite(origin) {
     assert.ok(Number(asset.headers.get('content-length')) > 0, `Nonempty asset ${path}`);
     checked++;
   }
-  const retained = JSON.parse(await docker(['exec', names.relay, 'node', '--input-type=module', '-e',
+  const retained = JSON.parse(await docker(['exec', names.powerbin, 'node', '--input-type=module', '-e',
     "import { existsSync } from 'node:fs'; import { readdir } from 'node:fs/promises'; const found=['/workspace','/opt/nsh','/opt/pnpm','/usr/local/cargo','/root/.cargo','/root/.rustup','/usr/local/bin/rustc','/usr/local/bin/cargo','/app/node_modules/powersync'].filter(existsSync); async function walk(path) { for(const e of await readdir(path,{withFileTypes:true})) { if(e.name==='node_modules') continue; const name=path+'/'+e.name; if(/^(?:\\.env(?:\\..*)?|\\.git|\\.tools|target)$/.test(e.name) || /\\.(?:pem|key|p12)$|signing-key.*\\.json$/i.test(e.name)) found.push(name); else if(e.isDirectory()) await walk(name); } } await walk('/app'); console.log(JSON.stringify(found));"]));
   assert.ok(retained.length === 0, 'Runtime excludes development secrets, private key files, and build toolchains');
   console.log(`PASS: current TSX entry, descriptor assets/fonts/chunks, adapter, workers, and ${checked} served assets; runtime contains no development secrets or build toolchains`);
@@ -132,8 +132,8 @@ try {
   for (const image of Object.values(images)) await docker(['image', 'inspect', image]);
   const ports = new Set();
   while (ports.size < 3) ports.add(await port());
-  const [postgresPort, relayPort, powersyncPort] = ports;
-  const apiOrigin = `http://127.0.0.1:${relayPort}`;
+  const [postgresPort, powerbinPort, powersyncPort] = ports;
+  const apiOrigin = `http://127.0.0.1:${powerbinPort}`;
   const syncOrigin = `http://127.0.0.1:${powersyncPort}`;
   created.network = true;
   await docker(['network', 'create', '--label', `powerbin.smoke=${prefix}`, prefix]);
@@ -141,25 +141,25 @@ try {
     created.volumes.push(volume);
     await docker(['volume', 'create', '--label', `powerbin.smoke=${prefix}`, volume]);
   }
-  await run('postgres', { POSTGRES_DB: 'relay', POSTGRES_USER: 'postgres', POSTGRES_PASSWORD: secrets.admin,
-    RELAY_APP_PASSWORD: secrets.app, RELAY_REPLICATION_PASSWORD: secrets.replication },
+  await run('postgres', { POSTGRES_DB: 'powerbin', POSTGRES_USER: 'postgres', POSTGRES_PASSWORD: secrets.admin,
+    POWERBIN_APP_PASSWORD: secrets.app, POWERBIN_REPLICATION_PASSWORD: secrets.replication },
   ['--publish', `127.0.0.1:${postgresPort}:5432`, '--mount', `type=volume,source=${volumes[0]},target=/var/lib/postgresql`]);
   await run('bucket', { POSTGRES_DB: 'powersync', POSTGRES_USER: 'powersync', POSTGRES_PASSWORD: secrets.storage },
     ['--mount', `type=volume,source=${volumes[1]},target=/var/lib/postgresql`]);
   await ready('source Postgres initialization', async () => {
-    const result = await docker(['exec', names.postgres, 'psql', '-U', 'postgres', '-d', 'relay', '-Atc',
-      "SELECT current_setting('wal_level') || ':' || (SELECT count(*) FROM pg_roles WHERE rolname IN ('relay_app', 'relay_sync')) || ':' || (SELECT string_agg(tablename, ',' ORDER BY tablename) FROM pg_publication_tables WHERE pubname='powersync')"]);
+    const result = await docker(['exec', names.postgres, 'psql', '-U', 'postgres', '-d', 'powerbin', '-Atc',
+      "SELECT current_setting('wal_level') || ':' || (SELECT count(*) FROM pg_roles WHERE rolname IN ('powerbin_app', 'powerbin_sync')) || ':' || (SELECT string_agg(tablename, ',' ORDER BY tablename) FROM pg_publication_tables WHERE pubname='powersync')"]);
     return result === 'logical:2:devices,items';
   });
   await ready('storage Postgres', async () => (await docker(['exec', names.bucket, 'pg_isready', '-U', 'powersync', '-d', 'powersync'])).includes('accepting connections'));
   console.log('PASS: fresh source schema, restricted roles, logical replication, publication, and separate storage initialized');
-  await run('powersync', { PORT: '8080', PS_DATA_SOURCE_URI: `postgresql://relay_sync:${secrets.replication}@postgres:5432/relay`,
-    PS_STORAGE_SOURCE_URI: `postgresql://powersync:${secrets.storage}@bucket:5432/powersync`, PS_JWKS_URI: 'http://relay:8080/api/keys', PS_ADMIN_TOKEN: secrets.powersync },
+  await run('powersync', { PORT: '8080', PS_DATA_SOURCE_URI: `postgresql://powerbin_sync:${secrets.replication}@postgres:5432/powerbin`,
+    PS_STORAGE_SOURCE_URI: `postgresql://powersync:${secrets.storage}@bucket:5432/powersync`, PS_JWKS_URI: 'http://powerbin:8080/api/keys', PS_ADMIN_TOKEN: secrets.powersync },
   ['--publish', `127.0.0.1:${powersyncPort}:8080`]);
-  const relayEnv = { PORT: '8080', HOST: '::', DATABASE_URL: `postgresql://relay_app:${secrets.app}@postgres:5432/relay`,
+  const powerbinEnv = { PORT: '8080', HOST: '::', DATABASE_URL: `postgresql://powerbin_app:${secrets.app}@postgres:5432/powerbin`,
     API_ORIGIN: apiOrigin, POWERSYNC_URL: syncOrigin, BOOTSTRAP_TOKEN: secrets.bootstrap, JWT_PRIVATE_JWK_FILE: '/data/signing-key.json' };
-  const relayArgs = ['--publish', `127.0.0.1:${relayPort}:8080`, '--mount', `type=volume,source=${volumes[2]},target=/data`];
-  await run('relay', relayEnv, relayArgs);
+  const powerbinArgs = ['--publish', `127.0.0.1:${powerbinPort}:8080`, '--mount', `type=volume,source=${volumes[2]},target=/data`];
+  await run('powerbin', powerbinEnv, powerbinArgs);
   await ready('PowerBin health', async () => (await request(apiOrigin, '/health')).status === 200);
   await ready('PowerSync startup', async () => (await fetch(`${syncOrigin}/probes/startup`, { signal: AbortSignal.timeout(3000) })).ok);
   console.log('PASS: PowerBin and PowerSync healthy without fixed host ports or existing development credentials');
@@ -175,7 +175,7 @@ try {
   const session = await request(apiOrigin, '/api/session', { token: device.device_token });
   assert.equal(session.status, 200);
   verifySession(session.body, jwks, device, apiOrigin, syncOrigin);
-  const keyState = () => docker(['exec', names.relay, 'node', '--input-type=module', '-e',
+  const keyState = () => docker(['exec', names.powerbin, 'node', '--input-type=module', '-e',
     "import { readFile, stat } from 'node:fs/promises'; import { createHash } from 'node:crypto'; console.log(JSON.stringify({ hash:createHash('sha256').update(await readFile('/data/signing-key.json')).digest('hex'),file:(await stat('/data/signing-key.json')).mode&511,directory:(await stat('/data')).mode&511 }));"]);
   const before = JSON.parse(await keyState());
   assert.ok(before.file === 0o600 && before.directory === 0o700, 'Private signing-key permissions');
@@ -183,13 +183,13 @@ try {
 
   if (native) {
     await command(process.env.CARGO || 'cargo', ['run', '--locked', '--manifest-path', 'app/Cargo.toml', '--example', 'sync_smoke'], {
-      env: { MIGRATION_DATABASE_URL: `postgresql://postgres:${secrets.admin}@127.0.0.1:${postgresPort}/relay`,
-        DATABASE_URL: `postgresql://relay_app:${secrets.app}@127.0.0.1:${postgresPort}/relay`, SMOKE_API_ORIGIN: apiOrigin, SMOKE_POWERSYNC_URL: syncOrigin },
+      env: { MIGRATION_DATABASE_URL: `postgresql://postgres:${secrets.admin}@127.0.0.1:${postgresPort}/powerbin`,
+        DATABASE_URL: `postgresql://powerbin_app:${secrets.app}@127.0.0.1:${postgresPort}/powerbin`, SMOKE_API_ORIGIN: apiOrigin, SMOKE_POWERSYNC_URL: syncOrigin },
       inherit: true, timeout: 600_000
     });
   }
-  await docker(['rm', '--force', names.relay]);
-  await run('relay', relayEnv, relayArgs);
+  await docker(['rm', '--force', names.powerbin]);
+  await run('powerbin', powerbinEnv, powerbinArgs);
   await ready('replacement PowerBin container', async () => (await request(apiOrigin, '/health')).status === 200);
   const after = JSON.parse(await keyState());
   assert.ok(before.hash === after.hash && before.file === after.file && before.directory === after.directory, 'Signing key survives container replacement');

@@ -4,6 +4,7 @@ export const MAX_PAYLOAD = 64 * 1024;
 export const MAX_BODY = 1024 * 1024;
 export const DEFAULT_TTL = 60 * 60 * 1000;
 export const MAX_TTL = 24 * DEFAULT_TTL;
+export const LINK_TTL = 48 * 60 * 60 * 1000;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class Rejected extends Error {}
@@ -100,8 +101,10 @@ export function itemInput(operation, deviceId, now = Date.now()) {
     check(data.expires_at == null, 'Saved snippets do not expire');
   } else {
     check(data.expires_at == null || typeof data.expires_at === 'string', 'Invalid expiry');
-    expiresAt = data.expires_at == null ? createdAt + DEFAULT_TTL : Date.parse(data.expires_at);
-    check(Number.isFinite(expiresAt) && expiresAt >= createdAt && expiresAt <= createdAt + MAX_TTL, 'Invalid expiry');
+    const defaultTtl = data.kind === 'link' ? LINK_TTL : DEFAULT_TTL;
+    const maxTtl = data.kind === 'link' ? LINK_TTL : MAX_TTL;
+    expiresAt = data.expires_at == null ? createdAt + defaultTtl : Date.parse(data.expires_at);
+    check(Number.isFinite(expiresAt) && expiresAt >= createdAt && expiresAt <= createdAt + maxTtl, 'Invalid expiry');
   }
   return {
     kind: data.kind,

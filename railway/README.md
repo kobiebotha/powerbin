@@ -1,14 +1,17 @@
 # Railway template preparation
 
 This stack has four services: `postgres` (application data), `bucket` (PowerSync
-storage), `powersync`, and `relay` (API plus the packaged Native Shell website).
-Only `relay` and `powersync` need public HTTPS domains. An existing
+storage), `powersync`, and `powerbin` (API plus the packaged Native Shell website).
+Only `powerbin` and `powersync` need public HTTPS domains. An existing
 [PowerBin draft](https://railway.com/workspace/templates/a22b8e33-dd36-455d-9887-1e93d2168810/settings)
 has the authored four-service configuration applied and confirmed by final API
 read-back. No running Railway deployment or marketplace publication has been
 requested. A separate
 [configuration-only project](https://railway.com/project/8f5b7f87-5f5d-4d1e-88e0-6038a724b7ea)
 has four configured services, no deployments, and no repository deployment triggers.
+The PowerBin service, database, role, and variable renames in this checkout have
+not been applied to either remote configuration; the API read-back above records
+the earlier configuration.
 
 The Dockerfiles and settings below define the stack.
 [template.json](template.json) is the authored `serializedConfig`, derived from
@@ -63,7 +66,7 @@ was requested. The original PowerSync starter is unchanged. See the
 | `postgres` | Repository; `railway/postgres.Dockerfile` | `/var/lib/postgresql` | None | None (no HTTP endpoint) |
 | `bucket` | Docker image `postgres:18` | `/var/lib/postgresql` | None | None (no HTTP endpoint) |
 | `powersync` | Repository; `railway/powersync.Dockerfile` | None | 8080 | `/probes/startup` |
-| `relay` | Repository; root `Dockerfile` | `/data` | 8080 | `/health` |
+| `powerbin` | Repository; root `Dockerfile` | `/data` | 8080 | `/health` |
 
 Set `RAILWAY_DOCKERFILE_PATH` to the indicated path on `postgres` and `powersync`.
 Leave start commands unset: each image supplies its command. Use one replica per
@@ -83,11 +86,11 @@ names above. Generated passwords use URL-safe alphanumeric characters.
 `postgres`:
 
 ```dotenv
-POSTGRES_DB=relay
+POSTGRES_DB=powerbin
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=${{secret(48)}}
-RELAY_APP_PASSWORD=${{secret(48)}}
-RELAY_REPLICATION_PASSWORD=${{secret(48)}}
+POWERBIN_APP_PASSWORD=${{secret(48)}}
+POWERBIN_REPLICATION_PASSWORD=${{secret(48)}}
 RAILWAY_DOCKERFILE_PATH=railway/postgres.Dockerfile
 ```
 
@@ -104,29 +107,32 @@ POSTGRES_PASSWORD=${{secret(48)}}
 ```dotenv
 PORT=8080
 RAILWAY_DOCKERFILE_PATH=railway/powersync.Dockerfile
-PS_DATA_SOURCE_URI=postgresql://relay_sync:${{postgres.RELAY_REPLICATION_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/relay
+PS_DATA_SOURCE_URI=postgresql://powerbin_sync:${{postgres.POWERBIN_REPLICATION_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/powerbin
 PS_STORAGE_SOURCE_URI=postgresql://powersync:${{bucket.POSTGRES_PASSWORD}}@${{bucket.RAILWAY_PRIVATE_DOMAIN}}:5432/powersync
-PS_JWKS_URI=http://${{relay.RAILWAY_PRIVATE_DOMAIN}}:8080/api/keys
+PS_JWKS_URI=http://${{powerbin.RAILWAY_PRIVATE_DOMAIN}}:8080/api/keys
 PS_ADMIN_TOKEN=${{secret(48)}}
 ```
 
-`relay`:
+`powerbin`:
 
 ```dotenv
 PORT=8080
 HOST=::
-DATABASE_URL=postgresql://relay_app:${{postgres.RELAY_APP_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/relay
+DATABASE_URL=postgresql://powerbin_app:${{postgres.POWERBIN_APP_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/powerbin
 API_ORIGIN=https://${{RAILWAY_PUBLIC_DOMAIN}}
 POWERSYNC_URL=https://${{powersync.RAILWAY_PUBLIC_DOMAIN}}
 BOOTSTRAP_TOKEN=${{secret(48)}}
 JWT_PRIVATE_JWK_FILE=/data/signing-key.json
 ```
 
-The configuration requests public domains for `relay` and `powersync`. `HOST=::`
+The configuration requests public domains for `powerbin` and `powersync`. `HOST=::`
 allows PowerBin to accept Railway private-network IPv6 requests from PowerSync.
-The source database initializes the schema, `relay_app` restricted write role,
-`relay_sync` replication/read role, and `powersync` publication only on a fresh
+The source database initializes the schema, `powerbin_app` restricted write role,
+`powerbin_sync` replication/read role, and `powersync` publication only on a fresh
 volume. The storage database is separate. Never expose either database publicly.
+Existing initialized volumes and environment variables are not renamed
+automatically. An existing installation needs a coordinated database/role and
+environment migration before adopting these defaults.
 
 Railway has no template function for a paired Ed25519 JWK. PowerBin generates the
 key once on the explicit `/data` path and reuses it across deployments. Existing
@@ -186,7 +192,7 @@ node railway/smoke.mjs --native
 ```
 
 The native fixture uses the supplied disposable database URL and skips the local
-`.env`. Images can be overridden with `SMOKE_RELAY_IMAGE`, `SMOKE_POSTGRES_IMAGE`,
+`.env`. Images can be overridden with `SMOKE_POWERBIN_IMAGE`, `SMOKE_POSTGRES_IMAGE`,
 `SMOKE_POWERSYNC_IMAGE`, and `SMOKE_STORAGE_IMAGE`; by default these are the three
 release tags above and `postgres:18`.
 

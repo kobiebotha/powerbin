@@ -9,8 +9,10 @@ use apple_native_keyring_store::protected::Store;
 #[cfg(target_os = "linux")]
 use zbus_secret_service_keyring_store::Store;
 
-const SERVICE: &str = "dev.powersync.relay";
-const USER: &str = "session";
+const SERVICE: &str = "dev.powersync.powerbin";
+// Keep the previous session record intact: its keys may still be needed to
+// recover v1 data. A v2 identity must never reuse its old shared group key.
+const USER: &str = "session-pq-v2";
 
 pub fn load() -> Result<Option<String>, String> {
     match entry()?.get_password() {

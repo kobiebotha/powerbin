@@ -3,7 +3,7 @@ import { Action, color, Heading, mono, Panel, small, timestamp, type State } fro
 
 export function Guest(props: { state: State }) {
   return <View style={{ gap: 22 }}>
-    <Heading title="One-time message." subtitle="Reveal it once. The server copy then disappears." />
+    <Heading title="One-time message." />
     <If when={!!props.state().guest?.expiresAt} else={
       <Panel>
         <Text style={{ ...mono, fontSize: 18, color: color.ink }}>{props.state().guest?.unavailable ? "This link is unavailable." : "Checking this link…"}</Text>
@@ -20,7 +20,7 @@ export function Guest(props: { state: State }) {
           <View style={{ gap: 16 }}>
             <Text style={{ ...mono, fontSize: 16, color: color.ink }}>{props.state().guest?.revealed ?? ""}</Text>
             <Action label="Copy snippet" state={props.state} primary action="copyOutput" />
-            <Text style={{ ...mono, fontSize: 12, color: color.muted }}>The link is now consumed. Keep your copy somewhere safe.</Text>
+            <Text style={{ ...mono, fontSize: 12, color: color.muted }}>The link is now consumed.</Text>
           </View>
         </If>
       </Panel>

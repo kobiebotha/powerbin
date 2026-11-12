@@ -37,6 +37,13 @@ pnpm run server
 it preserves an existing `.env`. Keep these files private. Read the bootstrap
 token locally when needed; do not log, commit, or paste the environment contents.
 
+App identifiers, storage namespaces, and new database/service configuration use
+PowerBin naming. Existing app keys and local data are not migrated automatically.
+Keep an already paired client available to approve replacement devices; an
+initialized backend cannot bootstrap another first device. Existing `.env` files
+and database volumes are preserved by setup and need a separate migration to the
+new database and role names.
+
 Defaults are API `http://localhost:18088`, PowerSync `http://localhost:18080`,
 web `http://localhost:4173`, source Postgres `15432`, and PowerSync's separate
 storage Postgres `15433`. This is an isolated local Docker stack.
@@ -96,10 +103,10 @@ Native device secrets live in the OS credential store; remembered browser
 secrets live in IndexedDB for that origin. Losing all device keys loses access
 to saved snippets. There is no recovery flow.
 
-Directed transfers and guest links expire after one hour. Guest mode opens no
-local PowerSync database. Opening a link checks availability; **Reveal & burn**
-atomically claims its ciphertext once. An ambiguous network failure after that
-claim can lose the message; it cannot be revealed again.
+Directed transfers expire after one hour; guest links expire after 48 hours.
+Guest mode opens no local PowerSync database. Opening a link checks availability;
+**Reveal & burn** atomically claims its ciphertext once. An ambiguous network
+failure after that claim can lose the message; it cannot be revealed again.
 
 Copy & burn hides a transfer locally and queues its server burn. When uploaded,
 the burn clears the server payload and propagates that change through sync.

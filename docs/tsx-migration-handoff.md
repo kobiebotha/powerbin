@@ -12,7 +12,7 @@ PowerBin is a visually attractive, clean Native Shell + PowerSync reference app,
 - Deliberate text, URL, and code sharing; no files, images, or automatic clipboard capture.
 - Send to one chosen remembered device, pair additional devices, save snippets across the user's devices, and create one-use guest links.
 - Immediate incoming updates are the main visible sync benefit. Offline handling is supporting behavior, not the marketing headline.
-- The app is named **PowerBin**, previously Relay.
+- The app is named **PowerBin**.
 - **Send** is the initial tab and first navigation item. Order: Send, Inbox, Saved, Devices.
 - Keep the current appearance and remove no working flows. The old footer, “A little less friction. A little more flow.”, was intentionally removed.
 
@@ -33,7 +33,7 @@ Paths below are relative to the workspace root.
 | `app/src/ui.rs` | Current views, styling, forms, tabs, guest screens, list rendering |
 | `app/src/controller.rs` | `Controller`, Rust `Ui` signals, `Action`, pairing, sends, saves, guest reveals, SDK watches |
 | `app/src/model.rs` | Item/device data and session/view structs |
-| `app/src/lib.rs` | Registers only the Rust `App` component under `relay/native` |
+| `app/src/lib.rs` | Registers only the Rust `App` component under `powerbin/native` |
 | `app/nsh.json` | Currently `"rust": "."`, `"root": "App"`, display name PowerBin |
 | `app/src/main.rs` | Direct desktop Rust-root runner; must be reconciled with the new TSX entry |
 | `app/src/db_native.rs`, `app/src/schema.rs` | Native PowerSync Rust SDK data layer and schema |
@@ -77,11 +77,11 @@ Expose UI-ready state and actions through a small facade. An initial snapshot pl
 
 Do not export the complete `Session` object as view state: it contains private keys, device tokens, and the group key. TSX needs display state and commands, not these secrets. Avoid maintaining independently mutable copies of the same authoritative state in both languages. Draft inputs can remain in TSX and be passed to commands if that simplifies the controller.
 
-**Preserve existing semantics and stored identities.**
+**Preserve existing semantics.**
 
-- Do not rename persistent identifiers simply because the display name changed: `dev.powersync.relay`, the `relay/native` module, original keychain/storage namespaces, database naming, and Android package paths are intentional compatibility choices.
+- The codebase now uses `dev.powersync.powerbin`, the `powerbin/native` module, PowerBin keychain/storage namespaces, database naming, and Android package paths. This identifier rename supersedes the migration's original compatibility choices: existing app data and keys are not automatically migrated, and devices need to pair again.
 - Pairing uses a short rendezvous code and Noise XX, with comparison of the entire fingerprint on both devices. Preserve confirmation and cancellation.
-- Directed transfers are recipient-encrypted; saved snippets use the shared group key. Transfers and guest links expire after one hour.
+- Directed transfers are recipient-encrypted; saved snippets use the shared group key. Transfers expire after one hour; guest links expire after 48 hours.
 - Copy & burn hides a received transfer locally and queues its server burn. Upload clears the server payload and syncs a tombstone. The app does not promise forensic erasure or retraction of clipboard/offline copies.
 - Opening a guest link does not consume it. Explicit Reveal & burn atomically claims and clears its ciphertext on the server. An ambiguous network failure can lose that secret. Guest mode opens no PowerSync database.
 - The cryptographic protocol is an unaudited demo. Keep its existing documented boundaries; this migration is not a crypto redesign.
@@ -91,7 +91,7 @@ Do not export the complete `Session` object as view state: it contains private k
 
 The mixed template keeps the Rust crate in `nsh.json` and uses a TSX entry instead of the configured Rust root. Check the pinned CLI's entry discovery and update commands/docs accordingly. Audit the direct Rust `app/src/main.rs` runner rather than leaving a reference to a deleted `App` type.
 
-The current Android Activity calls `initializeKeyring(...)` before `view.runRustApp("nsh")`. It will need the correct mixed/TSX loading path while retaining keyring, files-directory, and TLS initialization. See `app/android/README.md`, `build.sh`, `keyring.rs`, and `src/main/java/dev/powersync/relay/MainActivity.java`. The custom Gradle APK is the intended final artifact; the stock NSH APK is an intermediate.
+The current Android Activity calls `initializeKeyring(...)` before `view.runRustApp("nsh")`. It will need the correct mixed/TSX loading path while retaining keyring, files-directory, and TLS initialization. See `app/android/README.md`, `build.sh`, `keyring.rs`, and `src/main/java/dev/powersync/powerbin/MainActivity.java`. The custom Gradle APK is the intended final artifact; the stock NSH APK is an intermediate.
 
 iOS uses `app/ios/build-simulator.sh` to embed simulator keychain entitlement sections, then apply plain ad-hoc signing. Preserve that behavior and keep iOS and macOS output folders separate. Browser packaging must still copy the PowerSync adapter output, workers, and SQLite WASM assets into the packaged site. Rust-only browser compatibility code may change when introducing the JS runtime; remove it only after verifying the mixed build.
 

@@ -14,7 +14,7 @@ pub fn files_dir() -> Result<PathBuf, String> {
 }
 
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_dev_powersync_relay_MainActivity_initializeKeyring(
+pub extern "system" fn Java_dev_powersync_powerbin_MainActivity_initializeKeyring(
     mut env: JNIEnv<'_>,
     activity: JObject<'_>,
     context: JObject<'_>,

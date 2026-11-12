@@ -5,8 +5,7 @@ pub fn database_path(device_id: &str) -> Result<std::path::PathBuf, String> {
     #[cfg(target_os = "android")]
     let directory = crate::android_keyring::files_dir()?;
     #[cfg(not(target_os = "android"))]
-    // Keep the original storage namespace across app renames.
-    let directory = directories::ProjectDirs::from("dev", "PowerSync", "Relay")
+    let directory = directories::ProjectDirs::from("dev", "PowerSync", "PowerBin")
         .ok_or("Device data directory unavailable")?
         .data_dir()
         .to_owned();
@@ -36,11 +35,16 @@ pub async fn load() -> Result<Option<Session>, String> {
         .await
         .map_err(|e| e.to_string())??;
     value
-        .map(|v| serde_json::from_str(&v).map_err(|e| e.to_string()))
+        .map(|v| {
+            let session: Session = serde_json::from_str(&v).map_err(|e| e.to_string())?;
+            session.validate_crypto_version()?;
+            Ok(session)
+        })
         .transpose()
 }
 
 pub async fn save(session: &Session) -> Result<(), String> {
+    session.validate_crypto_version()?;
     let value = serde_json::to_string(session).map_err(|e| e.to_string())?;
     #[cfg(target_arch = "wasm32")]
     js_save(&value).await.map_err(crate::db_web::error)?;
@@ -66,7 +70,7 @@ pub fn web_origin() -> String {
             return origin;
         }
     }
-    option_env!("RELAY_WEB_ORIGIN").unwrap_or("").into()
+    option_env!("POWERBIN_WEB_ORIGIN").unwrap_or("").into()
 }
 
 pub fn guest_link() -> Option<(String, String)> {

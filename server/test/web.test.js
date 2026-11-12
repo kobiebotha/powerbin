@@ -22,11 +22,11 @@ function get(server, path, { method = 'GET', headers = {} } = {}) {
 }
 
 test('optional same-origin frontend serves only existing dist files', async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'relay-web-'));
+  const directory = await mkdtemp(join(tmpdir(), 'powerbin-web-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const dist = join(directory, 'dist');
   await mkdir(join(dist, 'api'), { recursive: true });
-  const javascript = Buffer.from('export const relay = true;');
+  const javascript = Buffer.from('export const powerbin = true;');
   const brotli = brotliCompressSync(javascript);
   const gzip = gzipSync(javascript);
   await Promise.all([

@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
     <key>application-identifier</key>
-    <string>SIMULATOR0.dev.powersync.relay</string>
+    <string>SIMULATOR0.dev.powersync.powerbin</string>
     <key>keychain-access-groups</key>
-    <array><string>SIMULATOR0.dev.powersync.relay</string></array>
+    <array><string>SIMULATOR0.dev.powersync.powerbin</string></array>
 </dict>
 </plist>

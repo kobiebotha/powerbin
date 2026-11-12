@@ -2,7 +2,7 @@
 
 This small Java Activity loads the shared TSX bundle through NSH's public
 `NshView.loadAssetBundle` API. Its generated mixed host links the Rust core and
-registers `relay/native` for TSX. Before loading, its JNI initializer supplies the
+registers `powerbin/native` for TSX. Before loading, its JNI initializer supplies the
 application context to Android keyring storage and the platform TLS verifier,
 and records `Context.getFilesDir()` for the local SQLite database. No NSH fork
 or Gradle Rust plugin is required.
@@ -39,8 +39,8 @@ preserving Android certificate validation.
 
 ## Local emulator
 
-The local validation device is an API 35 ARM64 emulator named `Relay_API_35`,
-with its AVD/user data under `.tools/android-validation/`. With SDK
+Use an API 35 ARM64 emulator with its AVD/user data under
+`.tools/android-validation/`. With SDK
 `platform-tools` on PATH and that emulator running:
 
 ```sh
@@ -48,7 +48,7 @@ adb -s emulator-5554 install -r app/android/build/outputs/apk/debug/PowerBin-deb
 adb -s emulator-5554 reverse tcp:18088 tcp:18088
 adb -s emulator-5554 reverse tcp:18080 tcp:18080
 adb -s emulator-5554 reverse tcp:4173 tcp:4173
-adb -s emulator-5554 shell am start -W -n dev.powersync.relay/.MainActivity
+adb -s emulator-5554 shell am start -W -n dev.powersync.powerbin/.MainActivity
 adb -s emulator-5554 logcat -d -b crash
 ```
 

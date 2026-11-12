@@ -14,7 +14,7 @@ test('explicit environment JWK takes precedence and never touches a key file', a
 });
 
 test('file signing key is private, stable across restarts, and safely created concurrently', async t => {
-  const directory = await mkdtemp(join(tmpdir(), 'relay-signing-'));
+  const directory = await mkdtemp(join(tmpdir(), 'powerbin-signing-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const path = join(directory, 'private', 'signing-key.json');
   const env = { JWT_PRIVATE_JWK_FILE: path };
