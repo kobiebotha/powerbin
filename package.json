@@ -7,7 +7,7 @@
     "setup": "node scripts/setup-env.mjs",
     "ps": "node --env-file=.env node_modules/powersync/bin/run.js",
     "migrate": "pnpm --filter powerbin-server migrate",
-    "test": "pnpm --filter powerbin-server test",
+    "test": "pnpm --filter powerbin-server test && pnpm --filter powerbin-web-sync test",
     "test:integration": "pnpm --filter powerbin-server test:integration",
     "server": "pnpm --filter powerbin-server start",
     "web:build": "pnpm --filter powerbin-web-sync build && nsh package app --target web && node scripts/copy-web-assets.mjs"

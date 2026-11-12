@@ -44,6 +44,10 @@ export interface Snapshot {
   error: string | null;
 }
 
+type DatabaseRows = Pick<Snapshot, 'items' | 'devices'>;
+const itemsQuery = 'SELECT * FROM items ORDER BY created_at DESC, id';
+const devicesQuery = 'SELECT * FROM devices ORDER BY created_at, id';
+
 export interface NewItem {
   id: string;
   kind: 'transfer' | 'saved' | 'link';
@@ -62,6 +66,9 @@ interface Session {
 let database: PowerSyncDatabase | undefined;
 let activeConfig: Config | undefined;
 let opening: Promise<void> | undefined;
+let rows: DatabaseRows | undefined;
+let firstRows: Promise<void> | undefined;
+let queryError: string | null = null;
 let lastError: string | null = null;
 const listeners = new Set<(value: Snapshot) => void>();
 
@@ -70,14 +77,28 @@ function db(): PowerSyncDatabase {
   return database;
 }
 
-async function emit(): Promise<void> {
-  const value = await snapshot();
+function currentSnapshot(): Snapshot {
+  const status = db().currentStatus;
+  return {
+    ...(rows || { items: [], devices: [] }),
+    connected: status.connected,
+    connecting: status.connecting,
+    has_synced: status.hasSynced || false,
+    last_synced_at: status.lastSyncedAt?.toISOString() || null,
+    error: queryError || lastError || status.uploadError?.message || status.downloadError?.message || null
+  };
+}
+
+function emit(): void {
+  // Wait for the watched query's initial data, unless opening it failed.
+  if (!database || (!rows && !queryError && !lastError)) return;
+  const value = currentSnapshot();
   for (const listener of listeners) listener(value);
 }
 
 function report(error: unknown): void {
   lastError = error instanceof Error ? error.message : String(error);
-  void emit().catch(console.error);
+  emit();
 }
 
 /** Opens the persistent local database; sync starts in the background. */
@@ -146,35 +167,52 @@ async function open(config: Config): Promise<void> {
   });
   await local.init();
   database = local;
-  local.registerListener({ statusChanged: () => { void emit().catch(report); } });
-  local.watch('SELECT id FROM items UNION ALL SELECT id FROM devices', [], {
-    onResult: () => { void emit().catch(report); },
-    onError: report
+  local.registerListener({ statusChanged: emit });
+  firstRows = new Promise<void>((resolve, reject) => {
+    // Watch the actual snapshot, including device trust/name changes needed to
+    // render the inbox. Keep both reads in one transaction. PowerSync serializes
+    // query executions and reruns after changes received during an in-flight read.
+    const query = local.customQuery<DatabaseRows>({
+      compile: () => ({ sql: itemsQuery, parameters: [] }),
+      execute: async () => [await local.readTransaction(async tx => ({
+        items: await tx.getAll<Item>(itemsQuery),
+        devices: await tx.getAll<Device>(devicesQuery)
+      }))]
+    }).watch({ triggerOnTables: ['items', 'devices'], reportFetching: false });
+    query.registerListener({
+      onData: ([value]) => {
+        if (!value) return;
+        rows = value;
+        queryError = null;
+        resolve();
+        emit();
+      },
+      onError: error => {
+        // The SDK also calls onError(null) when clearing a previous error.
+        // Publish recovery with the successful data in onData instead.
+        if (!error) return;
+        reject(error);
+        queryError = error.message || String(error);
+        emit();
+      }
+    });
   });
+  // Watch errors also reach subscribers through emit(), even when nobody is
+  // awaiting the initial snapshot.
+  void firstRows.catch(() => {});
   void local.connect(connector).catch(report);
 }
 
 export async function snapshot(): Promise<Snapshot> {
-  const local = db();
-  const rows = await local.readTransaction(async tx => ({
-    items: await tx.getAll<Item>('SELECT * FROM items ORDER BY created_at DESC, id'),
-    devices: await tx.getAll<Device>('SELECT * FROM devices ORDER BY created_at, id')
-  }));
-  const status = local.currentStatus;
-  return {
-    ...rows,
-    connected: status.connected,
-    connecting: status.connecting,
-    has_synced: status.hasSynced || false,
-    last_synced_at: status.lastSyncedAt?.toISOString() || null,
-    error: lastError || status.uploadError?.message || status.downloadError?.message || null
-  };
+  db();
+  if (!rows) await firstRows;
+  return currentSnapshot();
 }
 
 /** Returns an unsubscribe function. Payloads are JS objects for serde-wasm-bindgen. */
 export function watch(listener: (value: Snapshot) => void): () => void {
   listeners.add(listener);
-  if (database) void snapshot().then(value => { if (listeners.has(listener)) listener(value); }).catch(report);
+  if (database && (rows || queryError || lastError)) listener(currentSnapshot());
   return () => { listeners.delete(listener); };
 }
 

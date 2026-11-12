@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "build": "vite build && powersync-web copy-assets --output dist",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "test": "node --experimental-vm-modules --experimental-sqlite --test test/*.test.mjs"
   },
   "dependencies": {
     "@journeyapps/wa-sqlite": "^2.0.10",
