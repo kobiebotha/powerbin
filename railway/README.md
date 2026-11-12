@@ -4,52 +4,59 @@ This stack has four services: `postgres` (application data), `bucket` (PowerSync
 storage), `powersync`, and `relay` (API plus the packaged Native Shell website).
 Only `relay` and `powersync` need public HTTPS domains. An existing
 [PowerBin draft](https://railway.com/workspace/templates/a22b8e33-dd36-455d-9887-1e93d2168810/settings)
-has been identified; no remote template changes, publication, or deployment have
-been made by this repository's preparation work. A separate
+has the authored four-service configuration applied and confirmed by final API
+read-back. No running Railway deployment or marketplace publication has been
+requested. A separate
 [configuration-only project](https://railway.com/project/8f5b7f87-5f5d-4d1e-88e0-6038a724b7ea)
-was created through the API; it currently has no services or deployments.
+has four configured services, no deployments, and no repository deployment triggers.
 
-Railway templates are created in the [template composer](https://docs.railway.com/templates/create)
-or generated from an existing project. The Dockerfiles and settings below are
-the inputs to that workflow; this directory is not an invented template manifest.
-Use the eventual published repository/branch for all three GitHub-backed services,
-with the repository root as their root directory. The bucket uses a public image.
-
-[template.json](template.json) is the proposed `serializedConfig`, derived from
+The Dockerfiles and settings below define the stack.
+[template.json](template.json) is the authored `serializedConfig`, derived from
 the actual API response for the PowerSync starter. It is configuration data for
 the template API, rather than a file Railway automatically imports from Git.
-The GitHub sources currently use the local `init` branch; make that branch and
-the release sources available before deploying the template.
+The three GitHub-backed services use
+[`kobiebotha/powersync-native-shell-demo/tree/init`](https://github.com/kobiebotha/powersync-native-shell-demo/tree/init)
+with the repository root as their root directory. The bucket uses a public image.
 
-## API-only draft generation
+## Direct API draft authoring
 
-The public API can read and clone templates or generate a new draft from a
-project, but it has no mutation for replacing an existing draft's service graph.
-The connected Railway app likewise exposes published-template reads and project
-operations, rather than private-template editing or generation.
+The public `/graphql/v2` schema omits the app's template-authoring mutations.
+Railway's current app uses `/graphql/internal` for `templateChangeSetStage`,
+`templateChangeSets`, and `templateChangeSetApply`. This was confirmed from its
+official [editor asset](https://railway.com/assets/useTemplateEditor-OEqlO1md.js)
+and [shared app asset](https://railway.com/assets/modal-D5tuZPNc.js). The endpoint
+is undocumented and may change; no Railway UI or browser was used.
 
-[template-api.mjs](template-api.mjs) prepares a replacement draft through a new,
-configuration-only project. It stages the four-service configuration, commits it
-with `skipDeploys: true`, restores authored variable expressions, generates a new
-unpublished draft, and compares the exported variable defaults with `template.json`.
-It never publishes or requests a running deployment. On 11 November 2026 the
-API run created the configuration project, but staging stopped because Railway
-could not find the `init` branch on GitHub. Push the committed release branch
-before resuming. Preservation of generator expressions still needs to be confirmed
-by the read-back before considering the draft complete.
+[template-api.mjs](template-api.mjs) edits an existing unpublished draft directly.
+It stages the configuration, verifies the staged `draftView`, applies the change
+set, and compares the final `serializedConfig` with `template.json`, including
+variable defaults, source branches, networking, and volumes. It never publishes
+or requests a running deployment. The original PowerBin draft's change set is
+`APPLIED`; final read-back confirmed all four services, `/tree/init` sources,
+literal and generated defaults, service references, healthchecks, public-domain
+settings, and volumes.
+
+Use unique service and volume IDs for each independently derived template.
+Copied starter IDs caused collisions in this authoring flow; PowerBin's local
+configuration and remote draft now use their own canonical IDs.
 
 ```sh
 node railway/template-api.mjs plan
-node railway/template-api.mjs generate --workspace WORKSPACE_ID
+node railway/template-api.mjs apply --template a22b8e33-dd36-455d-9887-1e93d2168810
 ```
 
-Generation requires an account or workspace API token in `RAILWAY_API_TOKEN`,
+Applying requires an account or workspace API token in `RAILWAY_API_TOKEN`,
 supplied through the environment or the ignored root `.env`. A project token is
-insufficient for creating a project and template. Tokens are never printed.
-The script creates a new template ID and leaves the existing draft alone.
-It keeps progress and the exported configuration under ignored `.tools/`; if a
-mutation does not return a saved result, it stops instead of blindly repeating it.
-The configuration project and draft remain available for inspection.
+insufficient for workspace template authoring. Tokens are never printed.
+The script edits only the specified unpublished draft and keeps progress and the
+read-back under ignored `.tools/`. If a mutation does not return a saved result,
+it stops instead of blindly repeating it.
+
+The superseded generated draft `7eec8e95-dc52-49b8-a8ed-26d542bb012a` (code `t_GPKU`)
+is unpublished and missing literal defaults and the intended branch; do not use
+it. It and the configuration-only project remain pending cleanup; no deletion
+was requested. The original PowerSync starter is unchanged. See the
+[research notes](../docs/railway-template-research.md) for the API distinction.
 
 | Service | Source / Dockerfile | Volume | Public port | Health check |
 | --- | --- | --- | --- | --- |
@@ -65,9 +72,9 @@ write the mounted `/data` volume; the signing-key helper restricts its parent to
 0700 and creates the private key with mode 0600. Do not set a non-root run UID
 without provisioning matching volume ownership.
 
-## Template composer variables
+## Template variable defaults
 
-Enter the expressions literally in the template composer. Railway resolves
+These are the authored defaults in `template.json`. Railway resolves
 [reference variables](https://docs.railway.com/variables) and
 [secret functions](https://docs.railway.com/templates/create#template-variable-functions)
 when a user creates a deployment. Names in the references must match the service
@@ -115,7 +122,7 @@ BOOTSTRAP_TOKEN=${{secret(48)}}
 JWT_PRIVATE_JWK_FILE=/data/signing-key.json
 ```
 
-Generate a public domain for `relay` and `powersync` in the composer. `HOST=::`
+The configuration requests public domains for `relay` and `powersync`. `HOST=::`
 allows PowerBin to accept Railway private-network IPv6 requests from PowerSync.
 The source database initializes the schema, `relay_app` restricted write role,
 `relay_sync` replication/read role, and `powersync` publication only on a fresh
@@ -205,7 +212,8 @@ frontend. `node railway/smoke.mjs --native` passed against fresh databases:
   the existing development stack was left untouched.
 
 That smoke run used PowerSync Service 1.25.0. The Dockerfile subsequently returned
-to `latest`; no rebuild or retest was performed for that tag change.
+to `latest`; no rebuild or retest was performed for that tag change. No application
+retest was performed during API authoring, as requested.
 
 The 17 backend/domain/web/signing-key tests and browser adapter type-check also
 passed. Browser/macOS pairing, saved snippets, and one-use guest reveal were

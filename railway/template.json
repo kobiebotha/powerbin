@@ -1,16 +1,10 @@
 {
   "services": {
-    "05ac442e-1afa-44df-a704-e230bb81a4c2": {
+    "8d76c91b-e8a7-4448-9814-eab9a3596fab": {
       "icon": "https://devicons.railway.app/i/postgresql.svg",
       "name": "postgres",
-      "deploy": {
-        "startCommand": null,
-        "healthcheckPath": null
-      },
       "source": {
-        "repo": "kobiebotha/powersync-native-shell-demo",
-        "branch": "init",
-        "rootDirectory": null
+        "repo": "https://github.com/kobiebotha/powersync-native-shell-demo/tree/init"
       },
       "variables": {
         "POSTGRES_DB": {
@@ -75,18 +69,14 @@
         }
       },
       "volumeMounts": {
-        "05ac442e-1afa-44df-a704-e230bb81a4c2": {
+        "0b62d483-68ce-486d-b7e6-5c624fb75300": {
           "mountPath": "/var/lib/postgresql"
         }
       }
     },
-    "27ee0456-be8e-47a3-ab6c-6270fdd6eef7": {
+    "d281377f-40bb-4ad2-8367-af5827409ce1": {
       "icon": "https://devicons.railway.app/i/postgresql.svg",
       "name": "bucket",
-      "deploy": {
-        "startCommand": null,
-        "healthcheckPath": null
-      },
       "source": {
         "image": "postgres:18"
       },
@@ -138,22 +128,19 @@
         }
       },
       "volumeMounts": {
-        "27ee0456-be8e-47a3-ab6c-6270fdd6eef7": {
+        "d075918e-77b4-4c9a-a612-f32a3d33d0aa": {
           "mountPath": "/var/lib/postgresql"
         }
       }
     },
-    "1e2da649-2d1b-4b37-bcc5-deab08815f0d": {
+    "a1d60e16-7547-4b4a-b41e-0515d72263f2": {
       "icon": "https://journeyapps.com/assets/images/powersync-railway/powersync-logo-icon.png",
       "name": "powersync",
       "deploy": {
-        "startCommand": null,
         "healthcheckPath": "/probes/startup"
       },
       "source": {
-        "repo": "kobiebotha/powersync-native-shell-demo",
-        "branch": "init",
-        "rootDirectory": null
+        "repo": "https://github.com/kobiebotha/powersync-native-shell-demo/tree/init"
       },
       "networking": {
         "serviceDomains": {
@@ -193,17 +180,14 @@
         }
       }
     },
-    "311b006c-43ca-4a53-ae9d-9ff747fb7cda": {
+    "7a8bb6d5-c5c7-48ea-bae5-7d400c88ea2d": {
       "icon": "https://devicons.railway.app/node",
       "name": "relay",
       "deploy": {
-        "startCommand": null,
         "healthcheckPath": "/health"
       },
       "source": {
-        "repo": "kobiebotha/powersync-native-shell-demo",
-        "branch": "init",
-        "rootDirectory": null
+        "repo": "https://github.com/kobiebotha/powersync-native-shell-demo/tree/init"
       },
       "networking": {
         "serviceDomains": {
@@ -211,7 +195,7 @@
         }
       },
       "volumeMounts": {
-        "311b006c-43ca-4a53-ae9d-9ff747fb7cda": {
+        "074bbb10-551d-4bd4-b647-ce6ca781dee9": {
           "mountPath": "/data"
         }
       },
