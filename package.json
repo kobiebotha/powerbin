@@ -1,5 +1,6 @@
 {
   "name": "powersync-native-shell-demo",
+  "license": "CC0-1.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.18.0",

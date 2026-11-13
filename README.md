@@ -99,6 +99,12 @@ generic repository or state-management framework. See [app/README.md](app/README
 
 ## Privacy and burning
 
+Content encryption uses hybrid post-quantum X-Wing (ML-KEM-768 + X25519)
+with ML-DSA-65 sender signatures. Saved snippets and guest links use
+ChaCha20-Poly1305 with 256-bit keys. See [the protocol and upgrade notes](docs/post-quantum.md)
+for the exact scope, draft dependencies, and limitations. Protocol version 2
+rejects the earlier demo's ciphertext and device identities.
+
 Native device secrets live in the OS credential store; remembered browser
 secrets live in IndexedDB for that origin. Losing all device keys loses access
 to saved snippets. There is no recovery flow.
@@ -164,3 +170,7 @@ uses real app captures with cuts between states; edited timings are not a latenc
 benchmark. The [shot list](docs/social-video.md) provides a recording outline.
 
 ![PowerBin's Send screen on macOS](docs/media/powerbin-macos.png)
+
+## License
+
+This project is dedicated to the public domain under [CC0 1.0 Universal](LICENSE).

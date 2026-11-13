@@ -1,5 +1,6 @@
 {
   "name": "powerbin-web-sync",
+  "license": "CC0-1.0",
   "private": true,
   "type": "module",
   "scripts": {

@@ -41,7 +41,7 @@ pub struct Session {
 impl Session {
     pub fn validate_crypto_version(&self) -> Result<(), String> {
         if self.crypto_version != native_shell_crypto::PROTOCOL_VERSION {
-            return Err("This session uses an older encryption protocol. Set up a fresh post-quantum group; existing keys and data have been retained.".into());
+            return Err("This demo session uses an incompatible encryption protocol. Clear its local session and set it up again.".into());
         }
         Ok(())
     }

@@ -1,7 +1,8 @@
 use native_shell_crypto::{
-    CompletedPairing, DeviceIdentity, DirectedPurpose, Error, Key, KeyPair, MAX_PLAINTEXT, Pairing,
-    create_guest, device_admission, open_directed, open_guest, open_saved, random_key,
-    seal_directed, seal_saved, verify_device_admission,
+    CompletedPairing, DeviceIdentity, DirectedPurpose, Error, Key, KeyPair, MAX_PLAINTEXT,
+    PROTOCOL_VERSION, PUBLIC_KEY_LEN, Pairing, PublicKey, create_guest, device_admission,
+    open_directed, open_guest, open_saved, random_key, seal_directed, seal_saved,
+    verify_device_admission,
 };
 
 const TEXT: &[u8] = b"https://powersync.com/\nHello from another device.\n";
@@ -232,6 +233,7 @@ fn directory_admission_rejects_substituted_identity_fields_and_tags() {
     };
     let tag = device_admission(&group_key, &identity).unwrap();
     verify_device_admission(&group_key, &identity, &tag).unwrap();
+    let substituted = KeyPair::from_private([7; 32]);
     for changed in [
         DeviceIdentity {
             id: "attacker",
@@ -242,7 +244,7 @@ fn directory_admission_rejects_substituted_identity_fields_and_tags() {
             ..identity
         },
         DeviceIdentity {
-            public_key: &[7; 32],
+            public_key: substituted.public_key(),
             ..identity
         },
     ] {
@@ -315,10 +317,10 @@ fn malformed_versions_and_missing_contexts_are_rejected() {
         Error::InvalidInput
     );
     assert_eq!(
-        open_saved(&group_key, "id", &[2]).unwrap_err(),
+        open_saved(&group_key, "id", &[1]).unwrap_err(),
         Error::InvalidVersion
     );
-    assert!(open_saved(&group_key, "id", &[1]).is_err());
+    assert!(open_saved(&group_key, "id", &[PROTOCOL_VERSION]).is_err());
     assert_eq!(
         seal_saved(&group_key, "", TEXT).unwrap_err(),
         Error::InvalidInput
@@ -327,13 +329,125 @@ fn malformed_versions_and_missing_contexts_are_rejected() {
 
     let guest = create_guest("id", TEXT).unwrap();
     let mut version = guest.ciphertext;
-    version[0] = 2;
+    version[0] = 1;
     assert_eq!(
         open_guest(&guest.recipient_secret, "id", &version).unwrap_err(),
         Error::InvalidVersion
     );
     let keys = KeyPair::generate().unwrap();
     let mut pairing = Pairing::responder(&keys, "id").unwrap();
-    assert_eq!(pairing.read(&[2]).unwrap_err(), Error::InvalidVersion);
+    assert_eq!(pairing.read(&[1]).unwrap_err(), Error::InvalidVersion);
     assert!(pairing.finish().is_err());
+}
+
+#[test]
+fn public_bundles_are_versioned_validated_and_not_classical_keys() {
+    let keys = KeyPair::from_private([9; 32]);
+    let bytes = keys.public_key().as_ref();
+    assert_eq!(bytes.len(), PUBLIC_KEY_LEN);
+    assert_eq!(bytes[0], PROTOCOL_VERSION);
+    assert_eq!(PublicKey::from_bytes(bytes).unwrap(), *keys.public_key());
+    for malformed in [
+        vec![],
+        vec![2; 32],
+        bytes[..bytes.len() - 1].to_vec(),
+        [bytes, &[0]].concat(),
+    ] {
+        assert_eq!(
+            PublicKey::from_bytes(&malformed).unwrap_err(),
+            Error::InvalidInput
+        );
+    }
+    let mut legacy = bytes.to_vec();
+    legacy[0] = 1;
+    assert_eq!(
+        PublicKey::from_bytes(&legacy).unwrap_err(),
+        Error::InvalidVersion
+    );
+    // Noncanonical ML-KEM coefficients and low-order or noncanonical X25519.
+    for range in [1..33, 33..1217, 1217..1249] {
+        let mut invalid = bytes.to_vec();
+        invalid[range].fill(0xff);
+        assert_eq!(
+            PublicKey::from_bytes(&invalid).unwrap_err(),
+            Error::InvalidInput
+        );
+    }
+    for range in [1..33, 1217..1249] {
+        let mut invalid = bytes.to_vec();
+        invalid[range].fill(0);
+        assert_eq!(
+            PublicKey::from_bytes(&invalid).unwrap_err(),
+            Error::InvalidInput
+        );
+    }
+}
+
+#[test]
+fn every_ciphertext_mode_rejects_downgrades_and_oversized_envelopes() {
+    let a = KeyPair::generate().unwrap();
+    let b = KeyPair::generate().unwrap();
+    let purpose = DirectedPurpose::Transfer { item_id: "item" };
+    let mut directed = seal_directed(&a, b.public_key(), purpose, TEXT).unwrap();
+    let mut guest = create_guest("item", TEXT).unwrap();
+    let key = random_key().unwrap();
+    let mut saved = seal_saved(&key, "item", TEXT).unwrap();
+    for version in [0, 1, 3, 255] {
+        directed[0] = version;
+        saved[0] = version;
+        guest.ciphertext[0] = version;
+        assert_eq!(
+            open_directed(&b, a.public_key(), purpose, &directed).unwrap_err(),
+            Error::InvalidVersion
+        );
+        assert_eq!(
+            open_saved(&key, "item", &saved).unwrap_err(),
+            Error::InvalidVersion
+        );
+        assert_eq!(
+            open_guest(&guest.recipient_secret, "item", &guest.ciphertext).unwrap_err(),
+            Error::InvalidVersion
+        );
+        let mut pairing = Pairing::responder(&a, "pairing").unwrap();
+        assert_eq!(pairing.read(&[version]).unwrap_err(), Error::InvalidVersion);
+        assert!(pairing.finish().is_err());
+    }
+    let mut large = vec![0; MAX_PLAINTEXT + 10_000];
+    large[0] = PROTOCOL_VERSION;
+    assert_eq!(
+        open_directed(&b, a.public_key(), purpose, &large).unwrap_err(),
+        Error::InvalidInput
+    );
+    assert_eq!(
+        open_saved(&key, "item", &large).unwrap_err(),
+        Error::InvalidInput
+    );
+    assert_eq!(
+        open_guest(&key, "item", &large).unwrap_err(),
+        Error::InvalidInput
+    );
+    let mut pairing = Pairing::responder(&a, "pairing").unwrap();
+    assert_eq!(pairing.read(&large).unwrap_err(), Error::InvalidInput);
+    assert!(pairing.finish().is_err());
+}
+
+#[test]
+fn guest_and_saved_keys_cannot_be_reinterpreted_in_the_other_mode() {
+    let guest = create_guest("item", TEXT).unwrap();
+    assert!(open_saved(&guest.recipient_secret, "item", &guest.ciphertext).is_err());
+    let saved = seal_saved(&guest.recipient_secret, "item", TEXT).unwrap();
+    assert!(open_guest(&guest.recipient_secret, "item", &saved).is_err());
+}
+
+#[test]
+fn pairing_wrong_order_and_repeated_operations_fail_closed() {
+    let keys = KeyPair::generate().unwrap();
+    let mut responder = Pairing::responder(&keys, "pairing").unwrap();
+    assert!(responder.write().is_err());
+    assert!(responder.read(&[PROTOCOL_VERSION]).is_err());
+    assert!(responder.finish().is_err());
+    let mut initiator = Pairing::initiator(&keys, "pairing").unwrap();
+    initiator.write().unwrap();
+    assert!(initiator.write().is_err());
+    assert!(initiator.finish().is_err());
 }

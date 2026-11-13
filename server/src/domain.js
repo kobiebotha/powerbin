@@ -42,7 +42,7 @@ export function deviceInput(body) {
   return {
     id: uuid(body.device_id),
     name: text(typeof body.name === 'string' ? body.name.trim() : null, 'device name', 64),
-    public_key: text(body.public_key, 'public key', 4096),
+    public_key: text(body.public_key, 'public key', 8192),
     token_hash: credential(body.device_token)
   };
 }

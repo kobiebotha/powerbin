@@ -1,51 +1,68 @@
 # Shared cryptography
 
-This crate contains the same cryptographic operations for native builds and
-WASM. It has no PowerSync, network, storage, serialization, or UI dependencies.
-The application protocol is not audited.
+This crate provides the same protocol version 2 cryptography for native and
+WASM builds. It has no PowerSync, network, storage, serialization, or UI
+dependencies. The application protocol and its implementation are unaudited.
+See [the post-quantum protocol notes](../docs/post-quantum.md) for scope and
+primary specifications.
 
-- Device identity: a persistent X25519 `KeyPair`, stored only on its device.
-- Pairing: candidate sends XX messages 1 and 3, existing device sends message 2.
-  Use the pairing session ID as the context. After `finish()`, compare the **full
-  32-byte handshake hash** on both screens out of band. The short rendezvous
-  code is public. `CompletedPairing` does not mean the user approved anything.
-- Directed text and key grants: Noise K authenticates a previously trusted
-  sender. `DirectedPurpose` binds either the transfer item ID or recipient
-  device ID, with separate domains. Verify directory admission before using a
-  public key. During pairing, use the key authenticated by the verified XX
-  session and check it equals the candidate key the server will admit.
-- Guest: `create_guest` generates a new recipient secret for every item. Put
-  that secret only in the URL fragment. Noise N does not authenticate a sender.
-- Saved: ChaCha20Poly1305, random 96-bit nonce, authenticated item ID and mode.
-  HKDF-SHA256 derives distinct encryption and directory-admission subkeys.
-- Admission: HMAC-SHA256 authenticates device ID, displayed name, and raw public
-  key. Verification is constant time. All holders of the personal group key
-  can admit devices; this does not attribute approval to a particular device.
-
-The standard Noise patterns and handshake-hash channel binding are described
-in the [Noise specification](https://noiseprotocol.org/noise.html).
+- Device identity: a persistent 32-byte root secret derives separate Noise
+  X25519, X-Wing, and ML-DSA-65 keys using domain-separated derivation. The
+  public identity bundle contains version `0x02`, a 32-byte Noise public key,
+  a 1,216-byte X-Wing public key, and a 1,952-byte ML-DSA-65 public key.
+- Pairing: the candidate sends Noise XX messages 1 and 3; the existing device
+  sends message 2. Messages 2 and 3 carry the complete public identity bundles.
+  Use the pairing session ID as context. After `finish()`, compare the **full
+  32-byte handshake hash** on both screens through a trusted out-of-band
+  channel. The short rendezvous code is public. `CompletedPairing` does not
+  mean the user approved anything. Noise carries no group key or snippet
+  plaintext; its classical encryption is not the content-security boundary.
+- Directed text and group-key grants: HPKE uses X-Wing
+  (ML-KEM-768 plus X25519), HKDF-SHA256, and ChaCha20Poly1305. An encrypted
+  ML-DSA-65 signature authenticates the plaintext and its context.
+  `DirectedPurpose` separates transfers from group-key grants and binds the
+  item ID or recipient device ID. Check the sender's signature when opening.
+  X-Wing does not supply HPKE's authenticated mode; sender authentication
+  comes from the signature. Verify directory admission before trusting a
+  public identity. During pairing, use only the identity from the compared
+  transcript and check it equals the candidate identity the server admits.
+- Guest links: each item gets a new random 32-byte symmetric secret. Put that
+  secret only in the URL fragment. ChaCha20Poly1305 binds the item ID and
+  guest mode. A guest link does not authenticate a named sender.
+- Saved snippets: ChaCha20Poly1305 with a random 96-bit nonce and authenticated
+  item ID and mode. HKDF-SHA256 derives separate encryption and
+  directory-admission subkeys from the group key.
+- Admission: HMAC-SHA256 authenticates the device ID, exact displayed name,
+  and complete public identity bundle. Verification is constant time. Every
+  holder of the group key can admit devices; a tag does not attribute
+  approval to one specific device.
 
 ## Server mapping
 
-The application base64url-encodes raw public keys and opaque ciphertext bytes.
+The application base64url-encodes public identity bundles and opaque
+ciphertext bytes. The public identity is 3,201 bytes, or 4,268 base64url
+characters. The relay permits at most 8,192 UTF-8 bytes for that field.
+
 Store the base64url 32-byte `device_admission` tag in `devices.admission`.
-Before trusting a synced device, verify it against its exact ID, name, and
-decoded public key using the local group key. A renamed device needs a new tag.
+Before trusting a synced device, verify its exact ID, name, and decoded
+public identity using the local group key. A renamed device needs a new tag.
 
 Store the base64url result of `seal_directed` with
-`DirectedPurpose::GroupKey { device_id }` and a 32-byte group-key plaintext in
-`devices.shared_key_envelope`. Decrypt using the approver's key authenticated
-by the verified pairing session; bootstrap can grant to its own public key.
-The caller must remember the trusted grant sender locally or include its ID
-in an outer envelope and resolve that ID only through an already trusted key.
-An arbitrary public key supplied alongside a grant does not authenticate it.
+`DirectedPurpose::GroupKey { device_id }` and a 32-byte group-key plaintext
+in `devices.shared_key_envelope`. Send the grant only after the user confirms
+the full pairing fingerprint. Bootstrap can grant to its own identity.
+Decrypt and verify using the approver's identity from the compared pairing
+transcript. The caller must retain the trusted grant sender locally or
+resolve its ID through an already trusted identity. An arbitrary identity
+supplied alongside a grant does not authenticate it.
 
-Ciphertext format version 1 is one leading byte `0x01` followed by the Noise
-message. Saved ciphertexts instead contain `0x01`, a 12-byte nonce, and the
-AEAD ciphertext/tag. Admission tags are fixed 32 bytes; their authenticated
-input binds the protocol version. Plaintexts are capped at 32 KiB.
+All ciphertexts use version `0x02`; version 1 is rejected without a fallback.
+Directed envelopes carry the HPKE encapsulation and encrypted signed content.
+Saved and guest envelopes contain the version byte, a 12-byte nonce, and
+AEAD ciphertext/tag. Admission tags are fixed 32 bytes; their input binds the
+protocol version. Plaintexts are capped at 32 KiB.
 
 The application owns approval gating, device-local secret storage, directory
 replay/revocation policy, one-time server claims, expiry, and burning. Secret
-buffers exported by the caller need their own lifetime/cleanup policy. Clearing
-a Rust buffer is not a guarantee of physical erasure from device storage.
+buffers exported by the caller need their own lifetime and cleanup policy.
+Clearing a Rust buffer does not guarantee physical erasure from storage.

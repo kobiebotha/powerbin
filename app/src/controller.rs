@@ -243,7 +243,9 @@ impl Controller {
     }
 
     fn session(&self) -> Result<Session, String> {
-        self.ui.session.get().ok_or("Pair this device first".into())
+        let session = self.ui.session.get().ok_or("Pair this device first")?;
+        session.validate_crypto_version()?;
+        Ok(session)
     }
     fn database(&self) -> Result<db::Database, String> {
         self.database
@@ -1041,13 +1043,17 @@ fn apply_unpair_result(
 }
 
 fn verified_devices(session: &Session, devices: Vec<Device>) -> Vec<Device> {
+    if session.validate_crypto_version().is_err() {
+        return vec![];
+    }
     let Ok(group) = key(&session.group_key) else {
         return vec![];
     };
     devices
         .into_iter()
         .filter(|device| {
-            let (Ok(public), Some(tag)) = (public_key(&device.public_key), &device.admission) else {
+            let (Ok(public), Some(tag)) = (public_key(&device.public_key), &device.admission)
+            else {
                 return false;
             };
             let Ok(tag) = B64.decode(tag) else {
@@ -1075,6 +1081,7 @@ fn prepare_transfers(
     text: &str,
     now: OffsetDateTime,
 ) -> Result<Vec<Item>, String> {
+    session.validate_crypto_version()?;
     if text.trim().is_empty() {
         return Err("Add something to send".into());
     }
@@ -1210,6 +1217,47 @@ mod tests {
             admission: Some(admission(id, id, keys.public_key(), &GROUP).unwrap()),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn incompatible_sessions_cannot_trust_devices_or_send_with_reinterpreted_keys() {
+        let current = session();
+        let devices = vec![device("one", 2)];
+        for version in [0, 1, crypto::PROTOCOL_VERSION + 1] {
+            let legacy = Session {
+                crypto_version: version,
+                ..current.clone()
+            };
+            assert!(legacy.validate_crypto_version().is_err());
+            assert!(verified_devices(&legacy, devices.clone()).is_empty());
+            assert!(
+                prepare_transfers(
+                    &legacy,
+                    devices.clone(),
+                    "one",
+                    "Do not reuse the legacy group key",
+                    OffsetDateTime::UNIX_EPOCH,
+                )
+                .unwrap_err()
+                .contains("incompatible encryption protocol")
+            );
+        }
+        let mut stored = serde_json::to_value(&current).unwrap();
+        stored.as_object_mut().unwrap().remove("crypto_version");
+        let unversioned: Session = serde_json::from_value(stored).unwrap();
+        assert!(unversioned.validate_crypto_version().is_err());
+        assert!(current.validate_crypto_version().is_ok());
+    }
+
+    #[test]
+    fn classical_public_keys_cannot_enter_the_post_quantum_directory() {
+        let mut legacy = device("legacy", 2);
+        legacy.public_key = B64.encode([2; 32]);
+        assert!(public_key(&legacy.public_key).is_err());
+        assert!(verified_devices(&session(), vec![legacy]).is_empty());
+        let current = device("current", 3);
+        let decoded = public_key(&current.public_key).unwrap();
+        assert_eq!(B64.encode(decoded), current.public_key);
     }
 
     #[test]

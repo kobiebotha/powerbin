@@ -34,12 +34,9 @@ The build reads the public `API_ORIGIN` and `WEB_ORIGIN` values from the root
 use origin-local IndexedDB. No secret-storage fallback writes them to plaintext
 files.
 
-The app ID, native credential-store service, and local database names use
-PowerBin. Builds using the previous identifiers keep separate app data and
-credentials; pair devices again when switching to this build. Existing encrypted
-snippets require the original device keys and are not migrated automatically.
-Keep an already paired client available to approve the new device identities;
-an initialized backend cannot bootstrap another first device.
+The shared crypto crate uses protocol version 2 for post-quantum content
+encryption and sender verification. Earlier demo identities and ciphertext
+are incompatible. See [the protocol notes](../docs/post-quantum.md).
 
 ## Read the integration
 

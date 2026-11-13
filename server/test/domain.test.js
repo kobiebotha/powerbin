@@ -28,6 +28,17 @@ test('enrollment validates identity and hashes the device credential', () => {
   assert.equal(equalSecret(undefined, token), false);
 });
 
+test('enrollment accepts a hybrid post-quantum public identity within a bounded size', () => {
+  // Version byte, Noise X25519 key, X-Wing key, and ML-DSA-65 verification key.
+  // The relay bounds this opaque value; the clients validate its cryptography.
+  const publicKey = Buffer.concat([Buffer.from([2]), randomBytes(32 + 1216 + 1952)]).toString('base64url');
+  const input = { device_id: sender, name: 'Mac', public_key: publicKey, device_token: randomBytes(32).toString('base64url') };
+  assert.ok(publicKey.length > 4096);
+  assert.equal(deviceInput(input).public_key, publicKey);
+  assert.equal(deviceInput({ ...input, public_key: 'A'.repeat(8192) }).public_key.length, 8192);
+  assert.throws(() => deviceInput({ ...input, public_key: 'A'.repeat(8193) }), /Invalid public key/);
+});
+
 test('upload mutations cannot target other tables or modify encrypted content', () => {
   const put = transfer();
   assert.deepEqual(batchInput({ batch: [put] }), [put]);
