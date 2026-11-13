@@ -1,0 +1,93 @@
+# Full stack using published images. No local Rust, Node.js, or NSH build required.
+# Generate .env.docker first; see docs/docker.md.
+name: powerbin-selfhost
+
+services:
+  postgres:
+    image: ${POWERBIN_IMAGE_NAMESPACE:-ghcr.io/kobiebotha}/powerbin-postgres:${POWERBIN_IMAGE_TAG:-latest}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: powerbin
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POWERBIN_POSTGRES_PASSWORD:?Run scripts/setup-docker.mjs first}
+      POWERBIN_APP_PASSWORD: ${POWERBIN_APP_PASSWORD:?Run scripts/setup-docker.mjs first}
+      POWERBIN_REPLICATION_PASSWORD: ${POWERBIN_REPLICATION_PASSWORD:?Run scripts/setup-docker.mjs first}
+    volumes:
+      - postgres:/var/lib/postgresql
+    healthcheck:
+      # The entrypoint's temporary init server accepts only Unix-socket clients.
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, postgres, -d, powerbin]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  bucket:
+    image: postgres:18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: powersync
+      POSTGRES_USER: powersync
+      POSTGRES_PASSWORD: ${POWERBIN_STORAGE_PASSWORD:?Run scripts/setup-docker.mjs first}
+    volumes:
+      - bucket:/var/lib/postgresql
+    healthcheck:
+      test: [CMD, pg_isready, -h, 127.0.0.1, -U, powersync, -d, powersync]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  powerbin:
+    image: ${POWERBIN_IMAGE_NAMESPACE:-ghcr.io/kobiebotha}/powerbin:${POWERBIN_IMAGE_TAG:-latest}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      HOST: '::'
+      PORT: '8080'
+      DATABASE_URL: postgresql://powerbin_app:${POWERBIN_APP_PASSWORD:?Run scripts/setup-docker.mjs first}@postgres:5432/powerbin
+      API_ORIGIN: ${POWERBIN_API_ORIGIN:-http://localhost:18088}
+      POWERSYNC_URL: ${POWERBIN_POWERSYNC_URL:-http://localhost:18080}
+      BOOTSTRAP_TOKEN: ${POWERBIN_BOOTSTRAP_TOKEN:?Run scripts/setup-docker.mjs first}
+      JWT_PRIVATE_JWK_FILE: /data/signing-key.json
+    ports:
+      - '${POWERBIN_BIND_ADDRESS:-127.0.0.1}:${POWERBIN_HTTP_PORT:-18088}:8080'
+    volumes:
+      - keys:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://localhost:8080/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  powersync:
+    image: ${POWERBIN_IMAGE_NAMESPACE:-ghcr.io/kobiebotha}/powerbin-powersync:${POWERBIN_IMAGE_TAG:-latest}
+    platform: linux/amd64
+    restart: unless-stopped
+    environment:
+      PORT: '8080'
+      PS_DATA_SOURCE_URI: postgresql://powerbin_sync:${POWERBIN_REPLICATION_PASSWORD:?Run scripts/setup-docker.mjs first}@postgres:5432/powerbin
+      PS_STORAGE_SOURCE_URI: postgresql://powersync:${POWERBIN_STORAGE_PASSWORD:?Run scripts/setup-docker.mjs first}@bucket:5432/powersync
+      PS_JWKS_URI: http://powerbin:8080/api/keys
+      PS_ADMIN_TOKEN: ${POWERBIN_POWERSYNC_ADMIN_TOKEN:?Run scripts/setup-docker.mjs first}
+    ports:
+      - '${POWERBIN_BIND_ADDRESS:-127.0.0.1}:${POWERBIN_SYNC_PORT:-18080}:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bucket:
+        condition: service_healthy
+      powerbin:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://localhost:8080/probes/startup').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  postgres:
+  bucket:
+  keys:

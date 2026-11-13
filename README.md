@@ -12,7 +12,17 @@ compiled natively or to WebAssembly. A generated, typed
 [bridge](app/src/bridge.rs) pushes display state into TSX signals and sends
 commands back to the Rust core.
 
-## Run locally
+## Self-host
+
+Run the complete stack with Docker Compose: the packaged browser app, API,
+PowerSync, and both databases. See [the Docker guide](docs/docker.md) for setup,
+persistent storage, updates, and hosting on your own server. No local application
+build toolchain is needed.
+
+The [Railway guide](railway/README.md) covers the four-service template and the
+GHCR images published after successful checks on `master`.
+
+## Develop from source
 
 Prerequisites: Node.js 22.12+, pnpm 12.18.0 installed with its standalone installer
 or Homebrew, Docker with Compose 2.20.3+, Rust stable (validated

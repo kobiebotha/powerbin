@@ -2,10 +2,12 @@
 
 This stack has four services: `postgres` (application data), `bucket` (PowerSync
 storage), `powersync`, and `powerbin` (API plus the packaged Native Shell website).
-Only `powerbin` and `powersync` need public HTTPS domains. The local template uses
+Only `powerbin` and `powersync` need public HTTPS domains. The template uses
 prebuilt GHCR images so Railway pulls the runtime images without compiling Rust,
-WASM, or the frontend. Existing Railway projects and the remote template are not
-changed by edits to this checkout.
+WASM, or the frontend. The unpublished PowerBin draft was updated through the API
+on 13 November 2026 and verified against `template.json`, including image sources,
+variables, domains, health checks, and volumes. Edits to this checkout do not
+automatically update the remote template or existing Railway projects.
 
 ## Publish images with GitHub Actions
 
@@ -30,16 +32,14 @@ specific release or rollback. The bucket continues to use `postgres:18` directly
 Image names use the workflow repository owner's lowercase name, so forks publish
 under their own account; update the template image references when using a fork.
 
-To activate this from `init`:
+Before using the template:
 
-1. Push the workflow and accompanying template changes to `init`, then merge into
-   `master`. A merge is not needed to author the workflow; its first publication
-   happens when it lands on `master`.
-2. Wait for the **Publish container images** workflow to finish. GitHub defaults new GHCR
+1. Wait for the [**Publish container images** workflow](https://github.com/kobiebotha/powerbin/actions/workflows/publish-images.yml)
+   on `master` to finish successfully. GitHub defaults new GHCR
    packages to private. Set all three packages to **Public** in each package's
    settings so Railway and template users can pull without credentials. See
    [GitHub's container registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pushing-container-images).
-3. Verify anonymous access, for example with an empty Docker config directory:
+2. Verify anonymous access, for example with an empty Docker config directory:
 
    ```sh
    docker_config=$(mktemp -d)
@@ -48,35 +48,32 @@ To activate this from `init`:
    docker --config "$docker_config" pull --platform linux/amd64 ghcr.io/kobiebotha/powerbin-powersync:latest
    ```
 
-4. Switch the Railway service sources and the remote template to the image
-   references in `template.json` once the images are available. Preserve existing
-   environment variables and volumes. Existing database/role names need the
-   migration described below before adopting the renamed template defaults.
+3. Test a fresh installation from the draft before publishing the template.
+   Existing installations need the database/role migration described below
+   before adopting the renamed template defaults. Updating the draft does not
+   migrate their environment variables or volumes.
 
 Publishing updates GHCR. This workflow does not redeploy Railway; image update
 policies or an explicit redeploy control when a running project adopts a new
 image. Railway accepts [public Docker image sources](https://docs.railway.com/services#deploying-a-public-docker-image).
 
-## Earlier template authoring
+## Template authoring
 
 An existing
 [PowerBin draft](https://railway.com/workspace/templates/a22b8e33-dd36-455d-9887-1e93d2168810/settings)
-has the authored four-service configuration applied and confirmed by final API
-read-back during initial authoring. A separate
+has the GHCR configuration applied and confirmed by final API read-back. It remains
+unpublished for template testing. A separate
 [configuration-only project](https://railway.com/project/8f5b7f87-5f5d-4d1e-88e0-6038a724b7ea)
 was created with four configured services and no repository deployment triggers.
-The PowerBin service, database, role, and variable renames in this checkout have
-not been applied to either remote configuration; the API read-back above records
-the earlier configuration.
+That earlier project has not been updated and is not the template source.
 
 The Dockerfiles and settings below define the stack.
 [template.json](template.json) is the authored `serializedConfig`, derived from
 the actual API response for the PowerSync starter. It is configuration data for
 the template API, rather than a file Railway automatically imports from Git.
-Those earlier GitHub-backed service sources used
-[`kobiebotha/powersync-native-shell-demo/tree/init`](https://github.com/kobiebotha/powersync-native-shell-demo/tree/init)
-with the repository root as their root directory. The local specification now
-uses GHCR image sources; it has not been applied to those remote configurations.
+The draft previously built three services from the `init` branch. Its sources
+now use GHCR images, and its defaults use the current `powerbin` database and
+roles. No existing running project was changed.
 
 ## Direct API draft authoring
 
@@ -91,10 +88,12 @@ is undocumented and may change; no Railway UI or browser was used.
 It stages the configuration, verifies the staged `draftView`, applies the change
 set, and compares the final `serializedConfig` with `template.json`, including
 variable defaults, source branches, networking, and volumes. It never publishes
-or requests a running deployment. The original PowerBin draft's change set is
-`APPLIED`; final read-back confirmed all four services, `/tree/init` sources,
-literal and generated defaults, service references, healthchecks, public-domain
-settings, and volumes.
+or requests a running deployment. This initial authoring helper is for an empty
+draft. Updating an existing draft also requires explicit null deletion markers
+for obsolete source fields and variables; Railway merges template patches
+recursively. The GHCR update's change set is `APPLIED`, and final read-back
+confirmed all four services and current defaults. No template publication or
+running deployment was requested.
 
 Use unique service and volume IDs for each independently derived template.
 Copied starter IDs caused collisions in this authoring flow; PowerBin's local
@@ -102,7 +101,7 @@ configuration and remote draft now use their own canonical IDs.
 
 ```sh
 node railway/template-api.mjs plan
-node railway/template-api.mjs apply --template a22b8e33-dd36-455d-9887-1e93d2168810
+node railway/template-api.mjs apply --template EMPTY_DRAFT_ID
 ```
 
 Applying requires an account or workspace API token in `RAILWAY_API_TOKEN`,
@@ -251,11 +250,15 @@ The native fixture uses the supplied disposable database URL and skips the local
 `SMOKE_POWERSYNC_IMAGE`, and `SMOKE_STORAGE_IMAGE`; by default these are the three
 release tags above and `postgres:18`.
 
-On 13 November 2026, the GHCR publishing setup passed actionlint, all 28 unit
-tests, Linux amd64 image builds from commit `9af9181`, and the default release
-container/API smoke check, including all 65 served assets and signing-key persistence. This check did
-not use `--native`. The GitHub publishing jobs await the workflow landing on
-`master`; no GHCR publication or Railway source switch was performed locally.
+On 13 November 2026, PowerBin built locally for Linux amd64 from merged `master`
+commit `7372576`, and the default release container/API smoke check passed,
+including all 65 served assets and signing-key persistence. This check did not use
+`--native`. The full [Docker Compose setup](../docs/docker.md) also passed a fresh,
+isolated stack check, and its Docker-only credential setup command was verified.
+Actionlint passed, and all 28 unit tests passed in the GitHub merge run. That run
+failed during image building before publishing; the same PowerBin Docker build
+passed locally. A successful GitHub publishing run and anonymous GHCR pulls are
+still required before deploying the template.
 
 On 11 November 2026, all three release images built successfully for
 Linux amd64, including a frozen pnpm 12.18.0 install and the mixed TSX/Rust/WASM
@@ -278,9 +281,9 @@ frontend. `node railway/smoke.mjs --native` passed against fresh databases:
 - The disposable containers, network, and database/key volumes were removed;
   the existing development stack was left untouched.
 
-That smoke run used PowerSync Service 1.25.0. The Dockerfile subsequently returned
-to `latest`; no rebuild or retest was performed for that tag change. No application
-retest was performed during API authoring, as requested.
+That earlier smoke run used PowerSync Service 1.25.0. The current Dockerfile uses
+`latest`; the later release and Compose checks are recorded above. No Railway
+application retest was performed during API authoring.
 
 The 17 backend/domain/web/signing-key tests and browser adapter type-check also
 passed. Browser/macOS pairing, saved snippets, and one-use guest reveal were

@@ -1,10 +1,11 @@
 # Publishing a PowerBin Railway template
 
-Research checked 2026-11-11 against Railway and PowerSync primary sources. This
+Research checked 2026-11-11 against Railway and PowerSync primary sources, with
+the GHCR draft update verified on 2026-11-13. This
 note describes the authoring workflow and its current state. The four-service
 configuration has been applied to the original unpublished PowerBin draft and
 confirmed by final API read-back. No running Railway deployment or marketplace
-publication has been requested. No application retest was performed, as requested.
+publication has been requested.
 
 ## Recommendation
 
@@ -64,18 +65,21 @@ Each independently derived template needs unique service and volume IDs.
 Reusing the starter's IDs caused collisions in this authoring flow; PowerBin
 now has its own canonical IDs in the local configuration and remote draft.
 
-The current configuration targets
-[`kobiebotha/powersync-native-shell-demo/tree/init`](https://github.com/kobiebotha/powersync-native-shell-demo/tree/init)
-for the three repository-backed services. The PowerSync Dockerfile uses
+The initial configuration targeted the repository's `init` branch for three
+services. On 13 November 2026 the unpublished draft was updated to the three
+GHCR image sources and current PowerBin database/role defaults in
+[railway/template.json](../railway/template.json), with final API read-back.
+The PowerSync Dockerfile uses
 `journeyapps/powersync-service:latest`. Template passwords and tokens use literal
 `${{secret(48)}}` defaults and service references, rather than exported deployment
 credentials. [Variable functions](https://docs.railway.com/templates/create#template-variable-functions),
 [reference variables](https://docs.railway.com/variables)
 
-The change set on the original PowerBin draft is `APPLIED`. Final read-back
-confirmed all four services, `/tree/init` sources, literal and generated variable
+The GHCR change set on the original PowerBin draft is `APPLIED`. Final read-back
+confirmed all four services, image sources, literal and generated variable
 defaults, service references, healthchecks, public-domain settings, and volumes
-against the authored configuration. The PowerSync starter remains unchanged.
+against the authored configuration. Obsolete repository sources and variables
+were explicitly cleared with null deletion markers. The PowerSync starter remains unchanged.
 Applying template changes is separate from marketplace publication and deploying
 the stack.
 [Publish and share](https://docs.railway.com/templates/publish-and-share)
