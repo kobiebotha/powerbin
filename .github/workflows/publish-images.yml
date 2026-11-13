@@ -104,6 +104,9 @@ jobs:
       - name: Smoke test the release stack
         run: node railway/smoke.mjs
 
+      - name: Verify scheduled bucket cleanup
+        run: node railway/compaction-smoke.mjs
+
       - name: Save tested images
         if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
         run: |

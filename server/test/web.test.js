@@ -61,6 +61,8 @@ test('optional same-origin frontend serves only existing dist files', async t =>
       assert.equal(response.headers['cache-control'], 'no-cache');
       assert.equal(response.headers['referrer-policy'], 'no-referrer');
       assert.equal(response.headers['x-content-type-options'], 'nosniff');
+      assert.equal(response.headers['content-security-policy'], "frame-ancestors 'none'");
+      assert.equal(response.headers['x-frame-options'], 'DENY');
     }
   });
   await t.test('MIME, immutable assets, manifest revalidation, and HEAD', async () => {

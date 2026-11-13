@@ -1,5 +1,6 @@
 import { createServer as httpServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { isIP } from 'node:net';
 import { importJWK, SignJWT } from 'jose';
 import { webFiles, webPath } from './web.js';
 import { terminalLink, wantsTerminal } from './terminal.js';
@@ -126,21 +127,37 @@ export async function expireItems(pool) {
   await pool.query('DELETE FROM pairing_sessions WHERE expires_at < now() - interval \'1 day\'');
 }
 
-export async function createServer({ pool, bootstrapToken, privateJwk, powersyncUrl, issuer, allowedOrigins = [], webDist }) {
+export async function createServer({ pool, bootstrapToken, privateJwk, powersyncUrl, issuer, allowedOrigins = [], webDist, trustedProxyHeader = null }) {
   if (bootstrapToken.length < 32) throw new Error('BOOTSTRAP_TOKEN must be a high-entropy secret of at least 32 characters');
   if (privateJwk.kty !== 'OKP' || privateJwk.crv !== 'Ed25519' || !privateJwk.d) throw new Error('JWT_PRIVATE_JWK must be a private Ed25519 JWK');
+  if (trustedProxyHeader !== null && !['x-real-ip', 'x-forwarded-for'].includes(trustedProxyHeader)) {
+    throw new Error('TRUST_PROXY_HEADER must be x-real-ip or x-forwarded-for, or unset');
+  }
+  const publicUrl = new URL(issuer);
+  const localHttp = publicUrl.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(publicUrl.hostname);
+  if (publicUrl.protocol !== 'https:' && !localHttp) throw new Error('API_ORIGIN must use HTTPS, except on localhost');
   const signingKey = await importJWK(privateJwk, 'EdDSA');
   const publicJwk = { kty: 'OKP', crv: 'Ed25519', x: privateJwk.x, alg: 'EdDSA', use: 'sig', kid: privateJwk.kid || 'powerbin' };
-  const origins = new Set([new URL(issuer).origin, ...allowedOrigins]);
+  const origins = new Set([publicUrl.origin, ...allowedOrigins]);
   const attempts = new Map();
   const serveWeb = webDist ? await webFiles(webDist) : null;
 
-  function rateLimit(request) {
+  function rateLimit(request, response, route) {
     const now = Date.now();
-    const key = request.socket.remoteAddress;
+    const forwarded = trustedProxyHeader && request.headers[trustedProxyHeader];
+    const candidate = typeof forwarded === 'string'
+      ? (trustedProxyHeader === 'x-forwarded-for' ? forwarded.split(',').at(-1) : forwarded).trim()
+      : '';
+    // Only the immediate trusted proxy's address is used; client-supplied prefixes are ignored.
+    const address = isIP(candidate) && !candidate.includes('%') ? candidate : request.socket.remoteAddress;
+    const canonicalAddress = isIP(address) === 6 ? new URL(`http://[${address.split('%')[0]}]/`).hostname : address;
+    const key = JSON.stringify([route, canonicalAddress]);
     const current = attempts.get(key);
     if (current && current.until > now) {
-      if (++current.count > 30) throw new HttpError(429, 'Try again shortly');
+      if (++current.count > 30) {
+        response.setHeader('Retry-After', Math.ceil((current.until - now) / 1000));
+        throw new HttpError(429, 'Try again shortly');
+      }
     } else {
       attempts.set(key, { count: 1, until: now + 60_000 });
       for (const [address, attempt] of attempts) if (attempt.until <= now) attempts.delete(address);
@@ -151,7 +168,17 @@ export async function createServer({ pool, bootstrapToken, privateJwk, powersync
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
+    response.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
+    response.setHeader('X-Frame-Options', 'DENY');
     try {
+      // Forwarded protocol is trusted only when the operator configured a trusted proxy.
+      const forwardedProto = request.headers['x-forwarded-proto'];
+      const secure = request.socket.encrypted || (trustedProxyHeader && forwardedProto === 'https');
+      const direct = forwardedProto === undefined;
+      const internalRead = direct && request.method === 'GET' && ['/health', '/api/keys'].includes(request.url);
+      if (!secure && !(localHttp && direct) && !internalRead) throw new HttpError(403, 'HTTPS required');
+      if (secure && !localHttp) response.setHeader('Strict-Transport-Security', 'max-age=31536000');
+
       const origin = request.headers.origin;
       if (origin) {
         if (!origins.has(origin)) throw new HttpError(403, 'Origin not allowed');
@@ -183,7 +210,7 @@ export async function createServer({ pool, bootstrapToken, privateJwk, powersync
       if (method === 'GET' && path === '/api/keys') return json(response, 200, { keys: [publicJwk] });
 
       if (method === 'POST' && path === '/api/bootstrap') {
-        rateLimit(request);
+        rateLimit(request, response, 'bootstrap');
         if (!equalSecret(bearer(request), bootstrapToken)) throw new HttpError(401, 'Setup authentication required');
         const input = await body(request);
         const device = deviceInput(input);
@@ -198,7 +225,7 @@ export async function createServer({ pool, bootstrapToken, privateJwk, powersync
       }
 
       if (method === 'POST' && path === '/api/pairings') {
-        rateLimit(request);
+        rateLimit(request, response, 'pairings');
         const device = deviceInput(await body(request));
         const id = randomUUID();
         const code = pairingCode();
@@ -351,7 +378,7 @@ export async function createServer({ pool, bootstrapToken, privateJwk, powersync
           return json(response, 200, { expires_at: rows[0].expires_at, protocol_version: linkProtocolVersion(rows[0].payload) });
         }
         if (method === 'POST' && match[2]) {
-          rateLimit(request);
+          rateLimit(request, response, 'links');
           await body(request);
           const result = await transaction(pool, async client => {
             const { rows } = await client.query('SELECT payload, expires_at, burned_at FROM items WHERE id = $1 AND kind = \'link\' FOR UPDATE', [id]);

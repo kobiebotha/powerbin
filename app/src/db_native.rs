@@ -27,9 +27,11 @@ pub async fn connect(
     device_token: &str,
     powersync_endpoint: &str,
 ) -> Result<Database, String> {
+    crate::transport::origin(api_origin)?;
+    crate::transport::sync_endpoint(api_origin, powersync_endpoint)?;
     PowerSyncEnvironment::powersync_auto_extension().map_err(|e| e.to_string())?;
     let backend = Backend {
-        client: reqwest::Client::new(),
+        client: crate::transport::client()?,
         origin: api_origin.trim_end_matches('/').to_owned(),
         token: device_token.to_owned(),
     };
@@ -187,16 +189,46 @@ struct Backend {
 
 #[derive(Deserialize)]
 struct Credentials {
+    endpoint: String,
     token: String,
+}
+
+fn transport_error(message: String) -> PowerSyncError {
+    PowerSyncError::upload_error(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        message,
+    ))
+}
+
+#[cfg(test)]
+mod transport_tests {
+    #[test]
+    fn unsafe_sync_urls_are_rejected_before_opening_the_database() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        for (origin, endpoint) in [
+            ("http://powerbin.test", "https://sync.test"),
+            ("https://powerbin.test", "http://sync.test"),
+            ("https://powerbin.test", "http://127.0.0.1:8080"),
+        ] {
+            let result = runtime.block_on(super::connect(
+                "/invalid/database/path",
+                origin,
+                "dummy-token",
+                endpoint,
+            ));
+            assert!(matches!(result, Err(error) if error.contains("HTTPS")));
+        }
+    }
 }
 
 impl Backend {
     async fn credentials(&self) -> Result<Credentials, PowerSyncError> {
+        crate::transport::origin(&self.origin).map_err(transport_error)?;
         #[derive(Deserialize)]
         struct Session {
             powersync: Credentials,
         }
-        Ok(self
+        let credentials = self
             .client
             .get(format!("{}/api/session", self.origin))
             .bearer_auth(&self.token)
@@ -206,7 +238,10 @@ impl Backend {
             .error_for_status()?
             .json::<Session>()
             .await?
-            .powersync)
+            .powersync;
+        crate::transport::sync_endpoint(&self.origin, &credentials.endpoint)
+            .map_err(transport_error)?;
+        Ok(credentials)
     }
 }
 
@@ -228,6 +263,7 @@ struct Uploader {
 #[async_trait]
 impl MutationUploader for Uploader {
     async fn upload(&self) -> Result<(), PowerSyncError> {
+        crate::transport::origin(&self.backend.origin).map_err(transport_error)?;
         #[derive(Deserialize)]
         struct Reply {
             accepted: bool,

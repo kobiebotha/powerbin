@@ -1,4 +1,4 @@
-use crate::model::{Device, GuestView, Item, PairingView, Session};
+use crate::model::{Device, GuestView, Item, PairingView, RevokedDevice, Session};
 use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD as B64};
 use native_shell_crypto::{self as crypto, DirectedPurpose, Key, KeyPair, PublicKey};
 use nsh_core::prelude::*;
@@ -276,6 +276,23 @@ impl Controller {
     async fn unpair_device(&self, id: &str) -> Result<(), String> {
         let session = self.session()?;
         let target = unpair_target(&session, self.current_devices(), id)?;
+        let session = session_after_unpair(session, &target);
+        // Save before contacting the server: an ignored DELETE or lost reply
+        // must not make us trust this identity again after restarting.
+        crate::platform::save(&session).await.map_err(|error| {
+            format!("Could not save the unpair decision on this device; no server request was sent: {error}")
+        })?;
+        self.ui.session.set(Some(session.clone()));
+        let mut devices = self.ui.devices.get();
+        let mut recipient = self.ui.recipient.get();
+        apply_local_unpair(
+            &target,
+            &mut devices,
+            &mut recipient,
+            &mut self.locally_revoked.borrow_mut(),
+        );
+        self.ui.devices.set(devices);
+        self.ui.recipient.set(recipient);
         let response = request_with_method(
             &session.origin,
             &session.device_token,
@@ -284,18 +301,13 @@ impl Controller {
             None,
         )
         .await;
-        let mut devices = self.ui.devices.get();
-        let mut recipient = self.ui.recipient.get();
-        apply_unpair_result(
-            &target.id,
-            response,
-            &mut devices,
-            &mut recipient,
-            &mut self.locally_revoked.borrow_mut(),
-        )?;
-        self.ui.devices.set(devices);
-        self.ui.recipient.set(recipient);
-        self.ui.status.set(format!("Unpaired {}.", target.name));
+        confirm_unpair_result(response).map_err(|error| {
+            format!("{} is blocked on this device, but stopping its server access was not confirmed: {error}", target.name)
+        })?;
+        self.ui.status.set(format!(
+            "Unpaired {} · blocked on this device.",
+            target.name
+        ));
         Ok(())
     }
 
@@ -363,6 +375,13 @@ impl Controller {
 
     async fn restore(&self, mut session: Session) -> Result<(), String> {
         session.validate_crypto_version()?;
+        if let Err(error) = session.validate_transport() {
+            self.ui.origin.set(session.origin.clone());
+            self.ui.name.set(session.name.clone());
+            return Err(format!(
+                "{error} Enter this server's HTTPS URL and choose Create my PowerBin to recover your saved device."
+            ));
+        }
         if session.powersync_endpoint.is_empty() {
             self.ui.origin.set(session.origin.clone());
             self.ui.name.set(session.name.clone());
@@ -376,14 +395,12 @@ impl Controller {
 
     async fn open(&self, session: Session) -> Result<(), String> {
         session.validate_crypto_version()?;
-        if self
-            .ui
-            .session
-            .get()
-            .is_none_or(|current| current.device_id != session.device_id)
-        {
-            self.locally_revoked.borrow_mut().clear();
-        }
+        session.validate_transport()?;
+        *self.locally_revoked.borrow_mut() = session
+            .revoked_devices
+            .iter()
+            .map(|device| device.id.clone())
+            .collect();
         self.ui.session.set(Some(session.clone()));
         self.ui.name.set(session.name.clone());
         self.ui.origin.set(session.origin.clone());
@@ -478,11 +495,8 @@ impl Controller {
     }
 
     fn new_session(&self) -> Result<Session, String> {
-        let origin = self.ui.origin.get().trim_end_matches('/').to_owned();
-        let url = reqwest::Url::parse(&origin).map_err(|_| "Enter a valid PowerBin server URL")?;
-        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-            return Err("Enter an http or https PowerBin server URL".into());
-        }
+        let url = crate::transport::origin(self.ui.origin.get().trim())?;
+        let origin = url.as_str().trim_end_matches('/').to_owned();
         let name = self.ui.name.get().trim().to_owned();
         if name.is_empty() || name.len() > 80 {
             return Err("Give this device a name of 1–80 characters".into());
@@ -497,12 +511,16 @@ impl Controller {
             private_key: B64.encode(private),
             device_token: B64.encode(crypto::random_key().map_err(show)?),
             group_key: String::new(),
+            revoked_devices: vec![],
         })
     }
 
     async fn bootstrap(&self) -> Result<(), String> {
         let settings = self.new_session()?;
         let mut session = match crate::platform::load().await? {
+            Some(legacy) if legacy.validate_transport().is_err() => {
+                legacy.upgrade_transport(&settings.origin)?
+            }
             Some(pending) if pending.powersync_endpoint.is_empty() => pending,
             Some(_) => {
                 return Err("This device is already paired. Reopen PowerBin to continue.".into());
@@ -914,21 +932,7 @@ async fn request_with_method<T: DeserializeOwned>(
     method: reqwest::Method,
     body: Option<Value>,
 ) -> Result<T, String> {
-    let client = reqwest::Client::new();
-    let url = format!("{}{path}", origin.trim_end_matches('/'));
-    let mut request = client.request(method, url);
-    if let Some(body) = body {
-        request = request.json(&body);
-    }
-    if !token.is_empty() {
-        request = request.bearer_auth(token);
-    }
-    let response = request.send().await.map_err(show)?;
-    let status = response.status();
-    let value: Value = response.json().await.map_err(show)?;
-    if !status.is_success() {
-        return Err(value["error"].as_str().unwrap_or("Request failed").into());
-    }
+    let value = crate::transport::request(origin, token, path, method, body).await?;
     serde_json::from_value(value).map_err(show)
 }
 
@@ -1022,22 +1026,38 @@ fn unpair_target(session: &Session, devices: Vec<Device>, id: &str) -> Result<De
         .ok_or("This device is no longer a trusted paired device.".into())
 }
 
-fn apply_unpair_result(
-    id: &str,
-    response: Result<RevocationReply, String>,
+fn session_after_unpair(mut session: Session, target: &Device) -> Session {
+    if !session.is_locally_revoked(target) {
+        session.revoked_devices.push(RevokedDevice {
+            id: target.id.clone(),
+            public_key: target.public_key.clone(),
+        });
+    }
+    session
+}
+
+fn apply_local_unpair(
+    target: &Device,
     devices: &mut Vec<Device>,
     recipient: &mut String,
     locally_revoked: &mut HashSet<String>,
-) -> Result<(), String> {
+) {
+    // PowerSync may still emit its old local snapshot before the server change
+    // arrives. The durable session separately rejects both the ID and key.
+    locally_revoked.insert(target.id.clone());
+    if recipient.as_str() == target.id
+        || devices
+            .iter()
+            .any(|device| device.id == *recipient && device.public_key == target.public_key)
+    {
+        recipient.clear();
+    }
+    devices.retain(|device| device.id != target.id && device.public_key != target.public_key);
+}
+
+fn confirm_unpair_result(response: Result<RevocationReply, String>) -> Result<(), String> {
     if !response?.revoked {
         return Err("The server did not confirm that the device was unpaired.".into());
-    }
-    // PowerSync may still emit its old local snapshot before the server change
-    // arrives. Suppress that device for this session without editing synced rows.
-    locally_revoked.insert(id.into());
-    devices.retain(|device| device.id != id);
-    if recipient.as_str() == id {
-        recipient.clear();
     }
     Ok(())
 }
@@ -1052,6 +1072,9 @@ fn verified_devices(session: &Session, devices: Vec<Device>) -> Vec<Device> {
     devices
         .into_iter()
         .filter(|device| {
+            if session.is_locally_revoked(device) {
+                return false;
+            }
             let (Ok(public), Some(tag)) = (public_key(&device.public_key), &device.admission)
             else {
                 return false;
@@ -1205,6 +1228,7 @@ mod tests {
             private_key: B64.encode([1; 32]),
             device_token: String::new(),
             group_key: B64.encode(GROUP),
+            revoked_devices: vec![],
         }
     }
 
@@ -1491,19 +1515,17 @@ mod tests {
     }
 
     #[test]
-    fn confirmed_unpair_clears_only_the_removed_recipient_and_filters_stale_sync() {
+    fn local_unpair_clears_only_the_removed_recipient_and_filters_stale_sync() {
         let original = vec![device("sender", 1), device("one", 2), device("two", 3)];
         let mut devices = original.clone();
         let mut recipient = "one".to_owned();
         let mut locally_revoked = HashSet::new();
-        apply_unpair_result(
-            "one",
-            Ok(RevocationReply { revoked: true }),
+        apply_local_unpair(
+            &original[1],
             &mut devices,
             &mut recipient,
             &mut locally_revoked,
-        )
-        .unwrap();
+        );
         assert!(recipient.is_empty());
         assert_eq!(devices, vec![original[0].clone(), original[2].clone()]);
         let stale_snapshot = without_locally_revoked(original.clone(), &locally_revoked);
@@ -1521,41 +1543,88 @@ mod tests {
         assert_eq!(transfers[0].recipient_id.as_deref(), Some("two"));
 
         let mut recipient = "two".to_owned();
-        apply_unpair_result(
-            "one",
-            Ok(RevocationReply { revoked: true }),
+        apply_local_unpair(
+            &original[1],
             &mut original.clone(),
             &mut recipient,
             &mut locally_revoked,
-        )
-        .unwrap();
+        );
         assert_eq!(recipient, "two");
     }
 
     #[test]
-    fn failed_unpair_preserves_visible_membership_and_selection() {
+    fn unpair_survives_restart_and_blocks_replayed_ids_and_readmitted_keys() {
+        let original = device("one", 2);
+        let session = session_after_unpair(session(), &original);
+        let serialized = serde_json::to_string(&session).unwrap();
+        let restored: Session = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(restored.revoked_devices, session.revoked_devices);
+        let replayed = original.clone(); // A malicious server clears revoked_at.
+        let readmitted_key = device("new-id", 2); // Valid fresh admission, same key.
+        let reused_id = device("one", 4); // Valid fresh key, removed identity.
+        let remaining = device("two", 3);
+        let devices = vec![
+            replayed.clone(),
+            readmitted_key.clone(),
+            reused_id.clone(),
+            remaining.clone(),
+        ];
+        assert_eq!(
+            verified_devices(&restored, devices.clone()),
+            vec![remaining.clone()]
+        );
+        assert!(unpair_target(&restored, devices.clone(), &original.id).is_err());
+        let transfers = prepare_transfers(
+            &restored,
+            devices.clone(),
+            "",
+            "Only the remaining device",
+            OffsetDateTime::UNIX_EPOCH,
+        )
+        .unwrap();
+        assert_eq!(transfers.len(), 1);
+        assert_eq!(transfers[0].recipient_id.as_deref(), Some("two"));
+        for removed in [replayed, readmitted_key, reused_id] {
+            assert!(verified_devices(&restored, vec![removed.clone()]).is_empty());
+            assert!(
+                prepare_transfers(
+                    &restored,
+                    devices.clone(),
+                    &removed.id,
+                    "blocked",
+                    OffsetDateTime::UNIX_EPOCH,
+                )
+                .is_err()
+            );
+        }
+        assert_eq!(
+            session_after_unpair(restored.clone(), &original)
+                .revoked_devices
+                .len(),
+            1
+        );
+        // Existing sessions migrate without inventing past unpair decisions.
+        let mut old = serde_json::to_value(&restored).unwrap();
+        old.as_object_mut().unwrap().remove("revoked_devices");
+        let migrated: Session = serde_json::from_value(old).unwrap();
+        assert!(migrated.revoked_devices.is_empty());
+    }
+
+    #[test]
+    fn failed_server_unpair_cannot_reverse_the_persisted_local_block() {
         let original = vec![device("sender", 1), device("one", 2), device("two", 3)];
         for response in [
             Err("Server unavailable".to_owned()),
             Ok(RevocationReply { revoked: false }),
         ] {
-            let mut devices = original.clone();
-            let mut recipient = "one".to_owned();
-            let mut locally_revoked = HashSet::new();
-            assert!(
-                apply_unpair_result(
-                    "one",
-                    response,
-                    &mut devices,
-                    &mut recipient,
-                    &mut locally_revoked,
-                )
-                .is_err()
+            let session = session_after_unpair(session(), &original[1]);
+            assert!(confirm_unpair_result(response).is_err());
+            assert_eq!(
+                verified_devices(&session, original.clone()),
+                vec![original[0].clone(), original[2].clone()]
             );
-            assert_eq!(devices, original);
-            assert_eq!(recipient, "one");
-            assert!(locally_revoked.is_empty());
         }
+        assert!(confirm_unpair_result(Ok(RevocationReply { revoked: true })).is_ok());
     }
 
     #[test]

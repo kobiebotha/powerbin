@@ -38,6 +38,8 @@ pub async fn load() -> Result<Option<Session>, String> {
         .map(|v| {
             let session: Session = serde_json::from_str(&v).map_err(|e| e.to_string())?;
             session.validate_crypto_version()?;
+            // Reading local keys is safe even for a legacy HTTP URL. Controller
+            // restore validates before any network request and offers correction.
             Ok(session)
         })
         .transpose()
@@ -45,6 +47,7 @@ pub async fn load() -> Result<Option<Session>, String> {
 
 pub async fn save(session: &Session) -> Result<(), String> {
     session.validate_crypto_version()?;
+    session.validate_transport()?;
     let value = serde_json::to_string(session).map_err(|e| e.to_string())?;
     #[cfg(target_arch = "wasm32")]
     js_save(&value).await.map_err(crate::db_web::error)?;

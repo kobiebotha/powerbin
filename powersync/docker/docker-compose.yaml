@@ -12,7 +12,10 @@ include:
 services:
   powersync:
     restart: unless-stopped
-    image: journeyapps/powersync-service:latest
+    image: powerbin-powersync:dev
+    build:
+      context: ../..
+      dockerfile: railway/powersync.Dockerfile
     command: [ 'start', '-r', 'unified' ]
     env_file:
       - .env

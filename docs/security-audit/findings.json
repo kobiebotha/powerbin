@@ -1,0 +1,611 @@
+[
+  {
+    "verdict": "needs_validation",
+    "fingerprint": "app/src/controller.rs:new_session:http-origin-any-host",
+    "title": "App accepts a plain-HTTP server origin for any host and sends the setup token and device bearer over it",
+    "description": "The setup screen takes a server URL from the user. The only check is that the scheme is http or https and that a host is present. When the URL is http on a non-loopback host, the first-device flow sends the new device token as a bearer to /api/session, then the installation setup token as a bearer to /api/bootstrap with the device token again in the JSON body, all in cleartext. Every later API call and sync-credential refresh repeats the device bearer in cleartext. The project's own CLI refuses this transport and allows http only for localhost, 127.0.0.1 and [::1]. A network observer on the path would obtain the device bearer, which carries that device's API authority: listing, renaming and revoking devices, burning items, uploading rows, and minting sync tokens that expose all ciphertext and metadata. Item plaintext and keys stay protected by client-side encryption. Browser builds are less exposed because Web Crypto storage needs a secure context outside localhost. Native builds use reqwest's own socket and TLS stack, so OS policies such as iOS App Transport Security, which apply to the platform URL APIs, would not normally block the request. The shipped default origin is loopback, so exposure depends on a user entering a remote http URL.",
+    "claimed_root_cause": "new_session() validates the entered origin only with `matches!(url.scheme(), \"http\" | \"https\")` and a host-presence test, and request_with_method() and the native sync backend attach the bearer to whatever origin was stored. Cleartext transport to a remote host is never refused.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "app/src/bridge.rs",
+        "line": 220,
+        "scope": "Field::set",
+        "description": "The `origin` field from the native-to-JS bridge (the PowerBin server input) is stored in UI state without any check."
+      },
+      {
+        "kind": "propagation",
+        "file": "app/src/controller.rs",
+        "line": 483,
+        "scope": "Controller::new_session",
+        "description": "The origin is accepted if its scheme is http or https and it has a host. An http URL for a remote host passes and becomes Session.origin."
+      },
+      {
+        "kind": "propagation",
+        "file": "app/src/controller.rs",
+        "line": 521,
+        "scope": "Controller::bootstrap",
+        "description": "The freshly generated device token is sent as the bearer for GET /api/session on that origin."
+      },
+      {
+        "kind": "propagation",
+        "file": "app/src/controller.rs",
+        "line": 548,
+        "scope": "Controller::bootstrap",
+        "description": "The setup token is passed as the bearer for POST /api/bootstrap on that origin, with the device token in the JSON body built by identity()."
+      },
+      {
+        "kind": "sink",
+        "file": "app/src/controller.rs",
+        "line": 924,
+        "scope": "request_with_method",
+        "description": "The token is attached with bearer_auth and the request is sent to `origin + path` with no transport check."
+      }
+    ],
+    "evidence": [
+      {
+        "file": "app/src/controller.rs",
+        "line": 483,
+        "description": "Scheme allow-list accepts http for any host. There is no loopback restriction."
+      },
+      {
+        "file": "cli/src/client.ts",
+        "line": 32,
+        "description": "Sibling control in the CLI: http is rejected unless the host is localhost, 127.0.0.1 or [::1]."
+      },
+      {
+        "file": "app/src/controller.rs",
+        "line": 1176,
+        "description": "identity() places device_token in the JSON body used by POST /api/bootstrap and POST /api/pairings."
+      },
+      {
+        "file": "app/src/db_native.rs",
+        "line": 202,
+        "description": "The native sync backend re-sends the device bearer to `{origin}/api/session` on every credential refresh, and to /api/upload at line 254."
+      },
+      {
+        "file": "docs/docker.md",
+        "line": 64,
+        "description": "Operator guidance says to put an HTTPS reverse proxy in front of a server deployment. The client does not enforce it."
+      }
+    ],
+    "blockers": [
+      "The app crate does not build in the approved offline sandbox (it depends on the nsh git repository), so acceptance of an http non-loopback origin and the cleartext Authorization header were not observed locally. Source reading alone is unambiguous on the check, but no local reproduction exists.",
+      "Exposure depends on a deployment and user fact outside source: whether any installation gives a native client a non-loopback http origin. The default origin is loopback and the documentation recommends HTTPS, but nothing in the client prevents the alternative."
+    ],
+    "validation_plan": {
+      "local": "On an isolated machine, start a dummy HTTP listener on a non-loopback test address (for example a host-only interface address), build the native app, enter http://<test-address>:<port> as the PowerBin server with a dummy device name and dummy setup token, and press Create my PowerBin. Confirm the listener receives GET /api/session with an Authorization: Bearer header and POST /api/bootstrap whose Authorization bearer is the dummy setup token and whose JSON body contains device_token. Once the crate builds, a unit test that sets ui.origin to http://192.0.2.1 and calls new_session() should return Ok, which settles the check itself.",
+      "deployment": "The owner checks the server URL stored on each paired device (shown on the setup or session state) and confirms every one is https or a loopback address."
+    }
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "app/src/controller.rs:verified-devices:revocation-not-authenticated",
+    "title": "Unpairing a device is enforced only by a server-controlled column, so the server side can make clients trust an unpaired device again",
+    "description": "Clients decide which devices to encrypt to, and whose transfers to accept, from device rows delivered by sync. A row is trusted when its admission tag verifies under the group key and its revoked_at column is empty (app/src/controller.rs verified_devices). The tag covers only id, name and public key, the group key is never rotated, and the only client-side memory of an unpair is an in-process set on the device that performed it, cleared on restart. Whoever controls the rows clients receive (server operator, a Postgres writer, the PowerSync service or its storage) can therefore put an unpaired device back in the trusted set by serving its old row with revoked_at empty, or by never delivering the revocation to the other devices. Honest clients then include it in the default send-to-all-devices broadcast and accept transfers it signs. Because the unpaired device kept the group key, its holder can also mint admission tags for brand-new identities and can decrypt every saved snippet the server hands it. The server side alone gains no plaintext; the attack needs the unpaired device's key material too, which is exactly the case unpairing exists for. The project partly acknowledges this: docs/post-quantum.md says 'directory freshness and revocation' and disclosure of the group key 'retain their existing consequences'. The README and the 'Unpaired <name>' status message give users no such caveat, so a user who unpairs a lost device has no indication that it is not a cryptographic removal.",
+    "root_cause": "Revocation is not part of any authenticated state. crypto/src/lib.rs admission_mac binds id, name and public key under a group key that has no rotation path, and app/src/controller.rs verified_devices combines that check with the unauthenticated, server-supplied revoked_at column. Nothing persistent on the client records that a device was unpaired.",
+    "intended_behavior": "Once the user unpairs a device, no party lacking a current member's secrets should be able to make remaining devices encrypt to it or accept its messages. That needs revocation bound to key material that neither the server nor the unpaired device holds (a rotated group key with re-issued admissions), or at minimum a persisted local deny-list plus a clearly documented limit.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "powersync/sync-config.yaml",
+        "line": 14,
+        "scope": "personal stream, devices query",
+        "description": "Device rows, including admission and revoked_at, reach every active client from Postgres through the sync engine; the server, database and sync engine all control their content."
+      },
+      {
+        "kind": "propagation",
+        "file": "app/src/db_native.rs",
+        "line": 100,
+        "scope": "Database::watch_devices",
+        "description": "The client reads id, name, public_key, admission, created_at, revoked_at from the synced table into Device values as delivered."
+      },
+      {
+        "kind": "propagation",
+        "file": "app/src/controller.rs",
+        "line": 1062,
+        "scope": "verified_devices",
+        "description": "A device is trusted when revoked_at is None and the admission tag verifies; revoked_at is taken from the synced row as is."
+      },
+      {
+        "kind": "propagation",
+        "file": "crypto/src/lib.rs",
+        "line": 504,
+        "scope": "admission_mac",
+        "description": "The tag is HMAC over id, name and public key under HKDF(group key) with no epoch or revocation input, so a tag issued before the unpair keeps verifying."
+      },
+      {
+        "kind": "propagation",
+        "file": "app/src/controller.rs",
+        "line": 1088,
+        "scope": "prepare_transfers",
+        "description": "With no explicit recipient, every verified device other than the sender becomes a recipient."
+      },
+      {
+        "kind": "sink",
+        "file": "app/src/controller.rs",
+        "line": 1113,
+        "scope": "prepare_transfers",
+        "description": "The user's text is sealed to each such device's public key and queued for upload; plaintext() (line 343-347) likewise opens transfers signed by any verified device."
+      }
+    ],
+    "evidence": [
+      {
+        "file": "app/src/controller.rs",
+        "line": 1062,
+        "description": "The only revocation test in verified_devices is device.revoked_at.is_none() on the synced row."
+      },
+      {
+        "file": "crypto/src/lib.rs",
+        "line": 507,
+        "description": "admission_mac input is the device-admission context over id, name and public key only."
+      },
+      {
+        "file": "app/src/controller.rs",
+        "line": 61,
+        "description": "locally_revoked is an in-memory HashSet, filled at line 1037 after an unpair reply and cleared at line 385; it is never persisted or shared with other devices."
+      },
+      {
+        "file": "app/src/controller.rs",
+        "line": 515,
+        "description": "The group key is created at bootstrap and otherwise only set when received at pairing (line 740); no code replaces it after an unpair."
+      },
+      {
+        "file": "server/src/server.js",
+        "line": 322,
+        "description": "Unpairing is a single UPDATE of devices.revoked_at on the server; no client-side cryptographic step accompanies it."
+      },
+      {
+        "file": "app/src/controller.rs",
+        "line": 347,
+        "description": "plaintext() rejects a transfer with 'Sender is not trusted' only if the sender is absent from trusted_devices(), which is verified_devices over the synced rows."
+      },
+      {
+        "file": "docs/post-quantum.md",
+        "line": 77,
+        "description": "Project notes say directory freshness and revocation, and disclosure of the group key, retain their existing consequences: a partial acknowledgement of this limit. README.md (security notes around lines 140-155) does not mention it."
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "authorization_role",
+        "description": "The attacker controls the device rows clients receive: server operator, a writer to the source Postgres database, or the PowerSync service or its storage."
+      },
+      {
+        "kind": "data_state",
+        "description": "A device was paired and then unpaired, and the attacker holds that device's root seed (and the group key it kept)."
+      },
+      {
+        "kind": "user_interaction",
+        "description": "A remaining device sends with no explicit recipient (the default broadcast) or picks the re-listed device; the device visibly reappears in the Devices list under its old name."
+      },
+      {
+        "kind": "timing_dependency",
+        "description": "On the device that performed the unpair, the in-memory suppression lasts only until the app restarts or the session changes; other devices have none."
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "Controls what the sync stream returns for the devices table and holds the root seed of a device the user unpaired.",
+      "payloads": [
+        "devices row for the unpaired device, unchanged except revoked_at: {\"id\":\"B\",\"name\":\"Lost phone\",\"public_key\":\"<unchanged>\",\"admission\":\"<unchanged>\",\"revoked_at\":null}"
+      ],
+      "instructions": [
+        "In the no-network Rust sandbox, compile a test against the repository's crypto crate containing verbatim extracts of app/src/controller.rs key/public_key (935-945), verified_devices (1045-1075), the recipient filter of prepare_transfers (1088-1095) and the directed-transfer branch of plaintext (343-353), with model structs from app/src/model.rs and a local base64 shim (the app crate itself is not built).",
+        "Create devices A (the session), B and C with admission tags under one group key; have B seal a transfer to A.",
+        "Set B's row revoked_at as the honest server does; compute verified devices, broadcast recipients, and open B's transfer.",
+        "Set the same row's revoked_at back to null, changing nothing else, and repeat; seal to B as prepare_transfers does and open it with B's root seed.",
+        "Separately, add a new identity X whose admission tag was computed with only the group key; repeat the broadcast. Control: a tag under a different key is rejected."
+      ],
+      "observed_result": "check-1.log: honest rows: trusted [A, C], broadcast [C], transfer from B -> Err(\"Sender is not trusted\"). revoked_at nulled: trusted [A, B, C], broadcast [B, C], transfer from B -> Ok(\"text injected by unpaired device B\"), and B's root seed decrypted the transfer sealed to it (\"PLAINTEXT-MARKER-verifier-7e2d\"). Minted X: trusted [A, X], broadcast [X]. Control tag under a foreign key: not trusted."
+    },
+    "remediation": {
+      "strategy": "Make unpairing a cryptographic event: on unpair, the acting device generates a new group key, seals it to every remaining verified device, and re-issues admissions under the new key with an epoch bound into the MAC; clients accept only admissions for the newest epoch they hold, and new saved snippets use the new key. Until rotation exists, persist unpaired device ids and public keys in the local session record and reject them in verified_devices, propagate an HMAC-authenticated revocation tombstone so other devices learn it without trusting revoked_at, and state the limit in the README and the unpair confirmation. Regression case: a row for an unpaired device with revoked_at empty and its old admission must not appear in verified_devices or prepare_transfers recipients."
+    },
+    "severity": {
+      "likelihood": {
+        "score": "low",
+        "reason": "Needs control of the server, database or sync engine together with the key material of a device the user removed, and the device visibly reappears in the Devices list. The project documents revocation as a limit of its protocol."
+      },
+      "impact": {
+        "score": "medium",
+        "reason": "Text sent after the unpair is encrypted to the removed device and its messages are accepted again, defeating the purpose of unpairing; saved snippets were already readable with the retained group key. Demonstrated for one dummy transfer in each direction."
+      },
+      "overall_severity": "low"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "The source path is short and complete, no other client layer records revocation persistently, and the behaviour was reproduced independently using verbatim extracts of the target's functions and its real crypto crate; the app crate was not built whole."
+    }
+  },
+  {
+    "verdict": "rejected",
+    "fingerprint": "cli/package.json:powerbin-npm-release-unbound-to-source",
+    "title": "Unversioned `pnpx powerbin` instruction and manual npm release with no provenance (hardening, not a boundary failure)",
+    "description": "The server's terminal view (server/src/terminal.js:41) and both READMEs tell guests to run `pnpx powerbin reveal '<link with #key>'` with no version. The package `powerbin` (cli/package.json:2) is unscoped, published manually from a workstation per cli/README.md:93-95, has no provenance setting, and the repository has no git tags or CI step for the CLI. `npm pack` includes anything under the git-ignored cli/dist/ (dist/**/*.js etc.). All of these source facts are accurate. They do not, however, show a lower-trust actor who can influence which code the guest's command resolves to: the only party that can publish `powerbin` is the holder of the owner's npm account, which is the same trust root any npm-distributed CLI relies on, pinned or not.",
+    "claimed_root_cause": "server/src/terminal.js:41 (and README.md:97, cli/README.md:8) hard-code an unversioned `pnpx powerbin` instruction, while cli/package.json publishes under an unscoped name with no provenance configuration and the repository has no automated, tagged, or attested release path binding a published version to a commit.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "server/src/server.js",
+        "line": 175,
+        "scope": "request handler, GET /?link=",
+        "description": "An unauthenticated GET / with a link parameter whose Accept header or user agent selects the terminal view is passed to terminalLink."
+      },
+      {
+        "kind": "propagation",
+        "file": "server/src/terminal.js",
+        "line": 41,
+        "scope": "terminalLink",
+        "description": "For an available link, the reply tells the guest to run `pnpx powerbin reveal` with the complete link including #key. No version, scope or digest."
+      },
+      {
+        "kind": "propagation",
+        "file": "cli/package.json",
+        "line": 2,
+        "scope": "package manifest",
+        "description": "Unscoped name `powerbin`, version 0.1.2 (line 3), publishConfig public npmjs registry (lines 28-31), no provenance setting."
+      },
+      {
+        "kind": "propagation",
+        "file": "cli/package.json",
+        "line": 39,
+        "scope": "scripts.prepack",
+        "description": "prepack runs `pnpm run build`; the `files` allowlist (lines 10-18) takes everything matching dist/**/*.js, *.cjs, *.wasm, *.d.ts, *.d.cts from the git-ignored, uncleaned dist/."
+      },
+      {
+        "kind": "propagation",
+        "file": "cli/README.md",
+        "line": 93,
+        "scope": "Development, release instructions",
+        "description": "Manual release: build, test, pack, verify via isolated install, then publish the tarball 'using the npm account that owns the package' (line 94). No tag or attestation."
+      },
+      {
+        "kind": "propagation",
+        "file": ".github/workflows/publish-images.yml",
+        "line": 50,
+        "scope": "validate job",
+        "description": "CI runs root `pnpm test` (server and web-sync only, package.json:11) and publishes GHCR images in the master-only publish job (line 123-126). No npm credential or CLI step exists, so no CI contributor can reach npm publication."
+      },
+      {
+        "kind": "sink",
+        "file": "cli/src/index.ts",
+        "line": 74,
+        "scope": "main",
+        "description": "The resolved program reads the full link and key from argv or stdin (line 74) and passes it to revealLink (line 75). This repository's code keeps the key local."
+      }
+    ],
+    "evidence": [
+      {
+        "file": "server/src/terminal.js",
+        "line": 41,
+        "description": "Literal instruction `pnpx powerbin reveal '<paste the complete original link, including #key>'`."
+      },
+      {
+        "file": "README.md",
+        "line": 97,
+        "description": "Same unversioned command; README.md:106 refers to 'CLI 0.1.1 and later', indicating the owner already publishes this name."
+      },
+      {
+        "file": "cli/README.md",
+        "line": 94,
+        "description": "Release text states publication is done with the npm account that owns the package; the only publisher is the owner's account."
+      },
+      {
+        "file": "cli/package.json",
+        "line": 28,
+        "description": "publishConfig: access public, registry npmjs only. No dependencies of any kind and no install-time lifecycle script, so the guest's install resolves exactly one name controlled by one account."
+      },
+      {
+        "file": ".github/workflows/publish-images.yml",
+        "line": 123,
+        "description": "Publish job handles GHCR images only, master-only, contents: read; no npm token or npm step, so no PR or CI contributor path to the npm artifact."
+      },
+      {
+        "file": "package.json",
+        "line": 11,
+        "description": "Root test covers powerbin-server and powerbin-web-sync; cli:build and cli:test (lines 13-14) are not run by CI."
+      },
+      {
+        "file": "cli/package.json",
+        "line": 11,
+        "description": "files glob dist/**/*.js includes stale or extra files in the owner's own git-ignored dist/ (hunter check agents/hunt2-release/artifacts/check-1.log). Only the owner's working tree can place them, so this is release hygiene, not a lower-trust input."
+      },
+      {
+        "file": "cli/scripts/build-crypto.mjs",
+        "line": 12,
+        "description": "Build passes the full ambient environment and takes cargo, rustc and wasm-bindgen from .tools/ or PATH, checking wasm-bindgen by version string only (lines 44-47). A workstation fact under the owner's control."
+      }
+    ],
+    "reason": "Source shows no lower-trust actor that can influence what `pnpx powerbin` resolves to. The package declares no dependencies and no install-time script (cli/package.json:32-44), CI holds no npm credential and never touches cli/ (.github/workflows/publish-images.yml:50,123-130), and release is done by the account that owns the name (cli/README.md:93-95; README.md:106 confirms released versions exist). The guest therefore trusts exactly the owner's npm account. A version-pinned instruction would trust that same account, so the missing version, provenance and tags do not break a handoff; they only make published builds harder to audit. The candidate's own description says that if the owner holds the name, this is a hardening matter, and the opposite case (a third party holding `powerbin` while the owner's README documents releases of it) is a hypothetical with no source support. Supply-chain rule 1 requires a controllable source and a consuming boundary, and neither is shown. The uncleaned dist/ packing and the unpinned toolchain reach only the owner's own workstation. Hardening recommendations, not a finding: publish with npm trusted publishing and provenance from a tagged CI job; tag each released commit; clean cli/dist before build in prepack; consider printing a pinned `pnpx powerbin@<version>` in server/src/terminal.js that matches the server release; owner should confirm 2FA-for-publish on the npm account. No sandbox execution was needed or used. Note: HEAD in the target is now 79e9412, and the cited lines are unchanged from 653d3a5."
+  },
+  {
+    "verdict": "needs_validation",
+    "fingerprint": "powersync/sync-config.yaml:personal-stream:burned-payload-in-bucket-history",
+    "title": "Burned ciphertext stays in PowerSync bucket storage because the deployment never runs compaction",
+    "description": "Burn, expiry, and guest-link reveal set items.payload to NULL in the primary Postgres table, and the app tells the user the server copy has burned. Before that, the row version holding the payload was replicated through the powersync publication and written into the sync engine's Postgres bucket storage, because every items query in the personal stream is SELECT *. In PowerSync Service 1.26.0 (the sandbox image, read in check-4.log and check-5.log), the Postgres storage writer only inserts new bucket_data rows. A superseded PUT keeps its data column until PostgresCompactor rewrites it to a MOVE with data = NULL, and that compactor runs only from the separate 'compact' CLI command. Postgres storage has no scheduled or incremental compaction in that version. The repository runs only 'start -r unified' against Postgres storage and defines no compact job. On 1.26.0, then, the ciphertext of a burned transfer, saved snippet, or one-use link stays in the bucket storage database and its backups indefinitely. It is also re-sent to any client that syncs the bucket from an earlier op id, which getBucketDataBatch serves as op_id > start_op_id. A later reader of that storage who also has the matching key, such as an old guest link URL from a chat history, could decrypt a message the UI reported as burned. The README says the burn clears the server payload and lists only SQLite journals and backups as caveats. The deployed image is ':latest', so whether the running version behaves the same is not settled.",
+    "claimed_root_cause": "Burn is an UPDATE of the primary row only. The PowerSync bucket storage keeps the earlier PUT operation, payload included, until a compact run. The repository neither schedules compaction nor keeps payload out of the replicated history.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "server/src/server.js",
+        "line": 362,
+        "scope": "POST /api/links/:id/reveal",
+        "description": "An unauthenticated guest reveal sets payload to NULL and burned_at on the primary row. burnItem (line 114) and expireItems (line 122) do the same for transfers and saved snippets."
+      },
+      {
+        "kind": "propagation",
+        "file": "powersync/docker/modules/database-postgres/init-scripts/01-powersync-publication.sql",
+        "line": 1,
+        "scope": "publication powersync",
+        "description": "The whole items table is published, so the earlier row version with its payload was already streamed to the sync engine."
+      },
+      {
+        "kind": "propagation",
+        "file": "powersync/sync-config.yaml",
+        "line": 11,
+        "scope": "personal stream",
+        "description": "SELECT * on lines 11-13 puts the payload column into the bucket operations for the recipient, sender, and saved-item queries."
+      },
+      {
+        "kind": "sink",
+        "file": "railway/powersync.Dockerfile",
+        "line": 5,
+        "scope": "service command",
+        "description": "The service runs only 'start -r unified' on journeyapps/powersync-service:latest with Postgres storage (railway/service.yaml line 10). Nothing invokes the 'compact' command, so superseded PUT operations keep their data in bucket_data."
+      }
+    ],
+    "evidence": [
+      {
+        "file": "server/src/server.js",
+        "line": 114,
+        "description": "burnItem clears the payload with an UPDATE on the primary items table only."
+      },
+      {
+        "file": "server/src/server.js",
+        "line": 122,
+        "description": "expireItems clears the payload with an UPDATE on the primary table only."
+      },
+      {
+        "file": "powersync/sync-config.yaml",
+        "line": 11,
+        "description": "All three items queries (lines 11-13) select every column, including payload."
+      },
+      {
+        "file": "railway/service.yaml",
+        "line": 10,
+        "description": "Bucket storage type is postgresql. In 1.26.0, PostgresSyncRulesStorage.compact reports that incremental compacting is unsupported on Postgres storage, and compaction runs only through the compact CLI command (check-3.log, check-4.log)."
+      },
+      {
+        "file": "compose.yaml",
+        "line": 65,
+        "description": "The powersync service definition has no compact command and no companion job. The image tag defaults to latest."
+      },
+      {
+        "file": "app/src/controller.rs",
+        "line": 891,
+        "description": "After a reveal the client reports 'Revealed here. The server copy has burned.'"
+      },
+      {
+        "file": "README.md",
+        "line": 149,
+        "description": "Lines 149-152 say the burn clears the server payload and propagates through sync. The caveats name SQLite journals and backups, not sync-engine history."
+      }
+    ],
+    "blockers": [
+      "The repository deploys journeyapps/powersync-service:latest. The insert-only bucket_data writes, the MOVE-with-data-NULL rewrite done only by the compact command, and the absence of automatic Postgres-storage compaction were read from 1.26.0 source only (check-2.log to check-5.log). The deployed version may differ.",
+      "No PowerSync service or Postgres can run in the sandbox, so neither the stored bucket_data row nor its re-delivery to a fresh client was observed end to end.",
+      "How long the old row image also survives in source-Postgres WAL, the replication slot, or storage backups depends on deployment settings that are not in source."
+    ],
+    "validation_plan": {
+      "local": "With dummy data only, start the compose stack on the pinned PowerSync image version. Create a guest link and a saved snippet whose ciphertext contains a recognisable placeholder. Reveal the link and delete the snippet. Then, in the bucket storage database, run SELECT op, data FROM bucket_data WHERE row_id IN ('<link-id>','<snippet-id>') and record whether a PUT row still has the placeholder in data. Connect a freshly paired dummy device and record whether the sync stream delivers that PUT. Run 'compact' with the same service config and repeat both checks; the rows should become MOVE with data NULL.",
+      "deployment": "The owner checks which PowerSync service version the running :latest container reports and whether any compact job is scheduled. For one known burned item id, the owner checks the sync storage database (and its backups) for a bucket_data PUT row with that row_id whose data is not null."
+    }
+  },
+  {
+    "verdict": "confirmed",
+    "fingerprint": "server/src/server.js:rateLimit:socket-address-bucket-shared-behind-proxy",
+    "title": "Rate limiter keys on the TCP peer address, so behind a reverse proxy one anonymous client locks everyone out of pairing, bootstrap, and guest-link reveal",
+    "description": "The server has one abuse limiter. It counts requests per request.socket.remoteAddress in a single map shared by POST /api/bootstrap, POST /api/pairings, and POST /api/links/:id/reveal, and it counts each request before reading the body or checking any credential. The documented way to run a server is behind a reverse proxy with HTTPS (docs/docker.md:64-65). The server has no trusted-proxy setting, so every client reaches it from the proxy's address and all clients share one budget of 30 requests per minute. An unauthenticated caller who sends 30 empty POST /api/pairings requests per minute (about one every two seconds) makes all three routes return 429 to every other user for as long as the requests continue. New devices cannot start pairing, guests cannot reveal one-time links, and a fresh installation cannot be bootstrapped. No data is disclosed, links are not burned, and devices that are already paired keep syncing.",
+    "root_cause": "rateLimit() (server/src/server.js:138-148) builds its bucket key only from request.socket.remoteAddress, and one counter covers three unrelated routes. createServer has no trusted-proxy option (server/src/index.js:16-24). The counter is incremented before input validation and before the bootstrap-token check, so invalid anonymous requests use up the shared budget.",
+    "intended_behavior": "The limiter should bound each client's own attempts. It should key on the real client address, reading a forwarded header only when a trusted proxy is configured. Each limited route should have its own budget. One anonymous caller should never be able to use up the allowance of other callers.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "server/src/server.js",
+        "line": 200,
+        "scope": "POST /api/pairings route",
+        "description": "This route needs no authentication. It calls rateLimit(request) on line 201 before the body is read and validated on line 202, so an empty request with no credentials still counts."
+      },
+      {
+        "kind": "propagation",
+        "file": "server/src/server.js",
+        "line": 140,
+        "scope": "rateLimit",
+        "description": "The bucket key is request.socket.remoteAddress. Behind a reverse proxy this is the proxy's address for every client. Forwarded headers are never read, and no trusted-proxy option exists."
+      },
+      {
+        "kind": "propagation",
+        "file": "server/src/server.js",
+        "line": 135,
+        "scope": "createServer",
+        "description": "One attempts Map holds one counter per key for all limited routes: bootstrap (line 186), pairing create (line 201), and reveal (line 354)."
+      },
+      {
+        "kind": "sink",
+        "file": "server/src/server.js",
+        "line": 143,
+        "scope": "rateLimit",
+        "description": "After 30 requests in a 60-second window, the shared key returns 429 'Try again shortly' on all three routes for every caller behind the same peer address."
+      }
+    ],
+    "evidence": [
+      {
+        "file": "server/src/server.js",
+        "line": 140,
+        "description": "const key = request.socket.remoteAddress; is the only input to the limiter key. No x-forwarded-for or trust-proxy handling exists anywhere in server/src."
+      },
+      {
+        "file": "server/src/server.js",
+        "line": 354,
+        "description": "Guest-link reveal calls the same rateLimit(), so it shares the budget spent on /api/pairings."
+      },
+      {
+        "file": "server/src/server.js",
+        "line": 186,
+        "description": "Bootstrap calls rateLimit() on line 186, before the bootstrap token is compared on line 187, so the shared budget also gates first-device setup."
+      },
+      {
+        "file": "docs/docker.md",
+        "line": 64,
+        "description": "The deployment guide for running on a server says to put a reverse proxy with HTTPS in front of PowerBin, which makes the proxy the TCP peer for all clients."
+      },
+      {
+        "file": "server/src/index.js",
+        "line": 16,
+        "description": "createServer is configured from environment variables, with no trusted-proxy or client-address option."
+      },
+      {
+        "file": "railway/README.md",
+        "line": 176,
+        "description": "The Railway template serves the API on a public domain provided by the platform. This audit did not observe which peer address the container sees behind that ingress."
+      }
+    ],
+    "conditions": [
+      {
+        "kind": "authentication_level",
+        "description": "None. The attacker needs no token; empty POST requests are enough."
+      },
+      {
+        "kind": "network_routing",
+        "description": "The server is reached through a reverse proxy or load balancer that opens its own TCP connections to the backend, as docs/docker.md recommends for any deployment beyond loopback. On Railway, the peer address the container sees was not observed; the lockout affects whichever set of clients share a peer address."
+      },
+      {
+        "kind": "timing_dependency",
+        "description": "The attacker must keep sending about 30 requests per minute. The lockout ends within 60 seconds after the requests stop."
+      }
+    ],
+    "execution": {
+      "attacker_perspective": "An anonymous network caller who knows the public URL of a PowerBin deployment that sits behind a reverse proxy.",
+      "payloads": [
+        "POST /api/pairings with an empty body and no Authorization header, sent 30 times within one minute through the reverse proxy",
+        "POST /api/links/33333333-3333-4333-8333-333333333333/reveal with an empty body, sent through the same proxy from a different client address"
+      ],
+      "instructions": [
+        "In the sandbox (no network, loopback only), start the unmodified server in-process with createServer and a fake pool that holds one unburned dummy link.",
+        "Start a minimal local reverse proxy that forwards each request to the server over its own connection and appends X-Forwarded-For.",
+        "From client address 127.0.0.1, send 30 empty POST /api/pairings requests through the proxy. Each one returns 400.",
+        "From client address 127.0.0.2, send through the proxy a reveal request, a valid pairing-create request, and a bootstrap request with the correct token. Record the status codes and the fake-pool queries. Repeat with the victim sending its own X-Forwarded-For header.",
+        "As a control, repeat the same sequence against a fresh server with no proxy in front."
+      ],
+      "observed_result": "Reproduced independently by the verifier (check-1.log). Through the proxy, the attacker's 30 POST /api/pairings requests each returned 400, and request 31 returned 429. The victim on 127.0.0.2 then got: reveal -> 429 {\"error\":\"Try again shortly\"} with 0 DB queries and the link not burned; valid pairing create -> 429; bootstrap with the correct token -> 429. A victim-supplied X-Forwarded-For also got 429 on all three. The proxy saw client addresses [127.0.0.1, 127.0.0.2]. In the control with no proxy, attacker request 31 returned 429, while the victim's reveal returned 200 {\"payload\":\"BQUF\"}, pairing returned 201, and bootstrap returned 201. The same log tests the proposed fix applied to a scratch copy of server.js. With trustedProxyHops=1 behind the appending proxy, the victim got 200/201/201, including when the attacker put the victim's IP in its own X-Forwarded-For. With trustedProxyHops=0 and direct connections, an attacker rotating X-Forwarded-For was still blocked at request 31 (429). With trustedProxyHops=1 and the backend reached directly, bypassing the proxy, a rotating X-Forwarded-For evaded the limiter (31 x 400)."
+    },
+    "remediation": {
+      "strategy": "Add an explicit trusted-proxy setting (default 0, meaning off) and key the limiter on the client address it yields, falling back to the socket address. Give each limited route its own bucket. Document the setting next to the reverse-proxy guidance. The setting is safe only when two things hold. First, the backend must be reachable solely through that proxy: keep the loopback or private-network binding, because a client that connects directly can otherwise choose its own key, as shown in check-1.log. Second, the proxy must append the real peer address to X-Forwarded-For (for example nginx's $proxy_add_x_forwarded_for; Caddy and most platform ingresses do this by default). A proxy that passes the client's header through unchanged would let a client choose its own key. Further reductions in what an anonymous caller can spend: count only failed bootstrap-token attempts, and validate the pairing body before counting. Regression tests: through a forwarding fixture with the setting on, 30 requests from client A must not cause a 429 for client B. With the setting off, a client-supplied X-Forwarded-For must be ignored.",
+      "code_changes": [
+        {
+          "file_name": "server/src/server.js",
+          "fixed_code": "import { isIP } from 'node:net';\n\n// createServer({ ..., trustedProxyHops = 0 })\nfunction clientAddress(request) {\n  if (trustedProxyHops > 0) {\n    const hops = String(request.headers['x-forwarded-for'] || '').split(',').map(value => value.trim()).filter(Boolean);\n    const candidate = hops[hops.length - trustedProxyHops];\n    if (candidate && isIP(candidate)) return candidate;\n  }\n  return request.socket.remoteAddress;\n}\n\nfunction rateLimit(request, scope) {\n  const now = Date.now();\n  const key = `${scope}|${clientAddress(request)}`;\n  const current = attempts.get(key);\n  if (current && current.until > now) {\n    if (++current.count > 30) throw new HttpError(429, 'Try again shortly');\n  } else {\n    attempts.set(key, { count: 1, until: now + 60_000 });\n    for (const [entry, attempt] of attempts) if (attempt.until <= now) attempts.delete(entry);\n  }\n}\n// call sites: rateLimit(request, 'bootstrap'), rateLimit(request, 'pairing'), rateLimit(request, 'reveal')"
+        },
+        {
+          "file_name": "server/src/index.js",
+          "fixed_code": "  trustedProxyHops: Number(process.env.TRUSTED_PROXY_HOPS || 0),"
+        }
+      ]
+    },
+    "severity": {
+      "likelihood": {
+        "score": "medium",
+        "reason": "No credentials are needed and one request every two seconds is enough. The precondition is the deployment shape the project documents for servers. The attacker must know the deployment URL and gains nothing beyond disruption."
+      },
+      "impact": {
+        "score": "low",
+        "reason": "Pairing new devices, guest-link reveal, and first-device bootstrap are denied only while the requests continue. Plaintext, keys, and the device directory are unaffected, links are not consumed, and paired devices keep working."
+      },
+      "overall_severity": "low"
+    },
+    "confidence": {
+      "score": "high",
+      "reason": "The source trace is complete, and the verifier reproduced the result with its own loopback fixture (a forwarding proxy plus a no-proxy control) in check-1.log. The only fact not observed is how many peer addresses a particular hosted ingress, such as Railway, presents."
+    }
+  },
+  {
+    "verdict": "needs_validation",
+    "fingerprint": "server/src/server.js:response-headers:app-shell-framable",
+    "title": "Web app shell is served without frame-ancestors or X-Frame-Options while exposing click-only device unpair and delete actions",
+    "description": "The server sends no Content-Security-Policy frame-ancestors or X-Frame-Options header on any response, including the web app shell, and nothing in the app or the pinned Native Shell (NSH) web runtime prevents framing. The NSH runtime actively supports being embedded: it renders DOM elements (buttons, not a canvas-only surface) and switches to an 'nsh-embedded' mode when window.top !== window (nsh.js:814 in the pinned nsh checkout). The CSP meta tag the nsh build emits only sets connect-src (nsh-cli/src/web.rs:1120), and frame-ancestors is ignored in meta tags anyway. A paired browser session can unpair any device with two presses (Unpair, then 'Unpair device') and delete an item with one press, so a page that frames the app with the victim's session could try to trick the victim into those clicks (clickjacking). Current Chrome, Firefox and Safari partition IndexedDB for cross-site frames, so a framed copy on an unrelated site gets an empty, unpaired storage and has nothing to act on; the app never calls the Storage Access API. The attack remains possible only for a same-site embedder (an attacker-controlled sibling subdomain under the same registrable domain) or a browser without storage partitioning. Worst outcome: a victim unknowingly revokes one of their own devices or deletes an item (recoverable by re-pairing; no plaintext or key disclosure). Whether that situation exists depends on deployment and browser, so this is not asserted as a vulnerability.",
+    "claimed_root_cause": "The global response headers (server/src/server.js:151-153) and the static file responder (server/src/web.js:58-65) set no framing restriction for the HTML shell that hosts state-changing, bearer-authenticated UI actions.",
+    "trace": [
+      {
+        "kind": "entrypoint",
+        "file": "server/src/server.js",
+        "line": 151,
+        "scope": "request handler",
+        "description": "Every response, including GET / for the app shell, gets only Cache-Control, X-Content-Type-Options and Referrer-Policy; no frame-ancestors or X-Frame-Options."
+      },
+      {
+        "kind": "propagation",
+        "file": "server/src/web.js",
+        "line": 58,
+        "scope": "webFiles responder",
+        "description": "index.html is served with Content-Type, Content-Length, Vary, encoding and cache headers only (lines 58-65), so any origin may embed it in a frame."
+      },
+      {
+        "kind": "propagation",
+        "file": "app/web/src/vault.ts",
+        "line": 11,
+        "scope": "load",
+        "description": "The web client restores the device session (token and keys) from the origin's IndexedDB on load, if the browser gives the framed document first-party storage (same-site frame or no storage partitioning)."
+      },
+      {
+        "kind": "propagation",
+        "file": "app/ui/pairing.tsx",
+        "line": 126,
+        "scope": "Devices panel",
+        "description": "After pressing Unpair (line 88), one press on 'Unpair device' dispatches unpairDevice with no typed confirmation; app/ui/workspace.tsx:106 exposes a one-press Delete."
+      },
+      {
+        "kind": "sink",
+        "file": "server/src/server.js",
+        "line": 320,
+        "scope": "DELETE /api/devices/:id",
+        "description": "The dispatched action sends the bearer-authenticated DELETE (app/src/controller.rs:276-285), which sets revoked_at for the chosen device."
+      }
+    ],
+    "evidence": [
+      {
+        "file": "server/src/server.js",
+        "line": 151,
+        "description": "The only security headers set are Cache-Control, X-Content-Type-Options and Referrer-Policy (lines 151-153); no framing header anywhere in server/src."
+      },
+      {
+        "file": "server/src/web.js",
+        "line": 58,
+        "description": "Static responder adds no framing header to index.html."
+      },
+      {
+        "file": "app/ui/pairing.tsx",
+        "line": 126,
+        "description": "Destructive 'Unpair device' action is a plain press after one earlier press (line 88)."
+      },
+      {
+        "file": "app/ui/workspace.tsx",
+        "line": 106,
+        "description": "Item Delete is a single press dispatching burn."
+      },
+      {
+        "file": "app/web/src/vault.ts",
+        "line": 4,
+        "description": "Session material lives in IndexedDB database 'powerbin-device'; whether a framed document can read it is decided by browser storage partitioning."
+      }
+    ],
+    "blockers": [
+      "Whether a framed PowerBin document gets the victim's first-party IndexedDB session depends on browser policy outside the repository: current Chrome, Firefox and Safari partition storage for cross-site frames (which blocks the attack), while same-site frames and browsers without partitioning do not. No browser is available in the sandbox to observe this.",
+      "Whether any attacker-controlled host shares the PowerBin deployment's registrable domain (the only case that defeats partitioning in current browsers) is a deployment fact not visible in source.",
+      "Whether the deployed reverse proxy or hosting edge adds a framing header is a deployment fact not visible in source."
+    ],
+    "validation_plan": {
+      "local": "With dummy devices on a local test stack, serve the packaged web build through WEB_DIST at app.powerbin.test, pair two dummy devices in a current browser, then load the app in an iframe from (a) evil.example.test (cross-site) and (b) evil.powerbin.test (same-site). In each case record whether the framed Devices panel shows the paired session and whether pressing Unpair then 'Unpair device' inside the frame produces DELETE /api/devices/:id. Expected: (a) shows an unpaired app; (b) shows the session and the DELETE succeeds. Adding 'Content-Security-Policy: frame-ancestors 'none'' and 'X-Frame-Options: DENY' to responses in server.js should make both frames fail to render.",
+      "deployment": "The owner checks the response headers of the public app origin (in their own browser's developer tools) for Content-Security-Policy frame-ancestors or X-Frame-Options, and confirms whether any host they do not control shares the app's registrable domain (for example a shared PaaS domain not on the Public Suffix List)."
+    }
+  }
+]

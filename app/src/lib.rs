@@ -16,6 +16,7 @@ mod random_web;
 mod schema;
 #[cfg(not(target_arch = "wasm32"))]
 mod storage_native;
+mod transport;
 
 #[native_module("powerbin/native")]
 fn native(registry: &mut Registry) {
