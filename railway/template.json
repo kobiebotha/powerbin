@@ -4,7 +4,7 @@
       "icon": "https://devicons.railway.app/i/postgresql.svg",
       "name": "postgres",
       "source": {
-        "repo": "https://github.com/kobiebotha/powersync-native-shell-demo/tree/init"
+        "image": "ghcr.io/kobiebotha/powerbin-postgres:latest"
       },
       "variables": {
         "POSTGRES_DB": {
@@ -61,11 +61,6 @@
           "isOptional": false,
           "description": "Generated password for the PowerSync replication role",
           "defaultValue": "${{secret(48)}}"
-        },
-        "RAILWAY_DOCKERFILE_PATH": {
-          "isOptional": false,
-          "description": "Build the source database with PowerBin schema, roles, publication, and logical replication",
-          "defaultValue": "railway/postgres.Dockerfile"
         }
       },
       "volumeMounts": {
@@ -140,7 +135,7 @@
         "healthcheckPath": "/probes/startup"
       },
       "source": {
-        "repo": "https://github.com/kobiebotha/powersync-native-shell-demo/tree/init"
+        "image": "ghcr.io/kobiebotha/powerbin-powersync:latest"
       },
       "networking": {
         "serviceDomains": {
@@ -152,11 +147,6 @@
           "isOptional": false,
           "description": "PowerSync HTTP port",
           "defaultValue": "8080"
-        },
-        "RAILWAY_DOCKERFILE_PATH": {
-          "isOptional": false,
-          "description": "Build the latest PowerSync Service with PowerBin configuration and Sync Streams",
-          "defaultValue": "railway/powersync.Dockerfile"
         },
         "PS_DATA_SOURCE_URI": {
           "isOptional": false,
@@ -187,7 +177,7 @@
         "healthcheckPath": "/health"
       },
       "source": {
-        "repo": "https://github.com/kobiebotha/powersync-native-shell-demo/tree/init"
+        "image": "ghcr.io/kobiebotha/powerbin:latest"
       },
       "networking": {
         "serviceDomains": {

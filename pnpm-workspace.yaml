@@ -1,5 +1,6 @@
 packages:
   - server
   - app/web
+  - cli
 allowBuilds:
   yarn: false

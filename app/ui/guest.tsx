@@ -13,7 +13,6 @@ export function Guest(props: { state: State }) {
         <Text style={small}>{`Expires ${timestamp(props.state().guest?.expiresAt ?? "")}`}</Text>
         <If when={props.state().guest?.revealed != null} else={
           <View style={{ gap: 16 }}>
-            <Text style={{ ...mono, fontSize: 18, color: color.ink }}>Ready to reveal.</Text>
             <Action label="Reveal & burn" state={props.state} primary action="reveal" />
           </View>
         }>

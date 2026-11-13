@@ -10,6 +10,8 @@
     "migrate": "pnpm --filter powerbin-server migrate",
     "test": "pnpm --filter powerbin-server test && pnpm --filter powerbin-web-sync test",
     "test:integration": "pnpm --filter powerbin-server test:integration",
+    "cli:build": "pnpm --filter powerbin build",
+    "cli:test": "pnpm --filter powerbin test",
     "server": "pnpm --filter powerbin-server start",
     "web:build": "pnpm --filter powerbin-web-sync build && nsh package app --target web && node scripts/copy-web-assets.mjs"
   },

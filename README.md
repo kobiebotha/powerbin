@@ -79,6 +79,28 @@ This serves the app, guest links, and API from one origin. For links created in
 the native app to point here, set `WEB_ORIGIN` to `http://localhost:18088` in
 `.env` and rebuild the native app. App builds embed only the public API/web URLs.
 
+## Command-line recipients
+
+Reveal a one-use guest link with Node.js 22.12 or later:
+
+```sh
+pnpx powerbin reveal '<complete original link, including #key>'
+```
+
+The TypeScript CLI bundles the shared Rust decryption code as WASM. It needs no
+account or paired device, keeps the key local, and uses the same atomic reveal
+API as the browser. Piped output preserves the exact message bytes; `--raw`
+also disables terminal formatting and the success status. See the
+[CLI documentation](cli/README.md) for standard input, errors, and development.
+
+CLI 0.1.1 and later check the link's encryption version before claiming it. Keep
+the server and browser deployment current: legacy v1 links and servers without
+protocol metadata are refused without consumption.
+
+`curl '<link>'` returns readable availability and CLI instructions without
+consuming the message. A reveal can be lost if the server burns the ciphertext
+but its response does not arrive; the CLI does not retry that request.
+
 ## Code map
 
 | File | Responsibility |
@@ -160,7 +182,8 @@ runtime flows. Migration validation is recorded separately in
 
 Android's public embedding host and prerequisites are in
 [app/android/README.md](app/android/README.md). The four-service Railway setup is in
-[railway/README.md](railway/README.md). No Railway template or deployment has been published.
+[railway/README.md](railway/README.md). GitHub Actions validates pull requests and
+publishes tested GHCR images when changes land on `master`.
 
 ## Demo material
 

@@ -2,6 +2,7 @@ import { createServer as httpServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { importJWK, SignJWT } from 'jose';
 import { webFiles, webPath } from './web.js';
+import { terminalLink, wantsTerminal } from './terminal.js';
 import {
   MAX_BODY, Rejected, batchInput, check, deviceInput, equalSecret, hash,
   itemInput, normalizeCode, pairingCode, pairingMessage, text, uuid
@@ -18,6 +19,12 @@ const admission = value => value == null ? null : text(value, 'admission proof',
 function json(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(body));
+}
+
+function linkProtocolVersion(payload) {
+  if (typeof payload !== 'string' || !/^[A-Za-z0-9_-]+$/.test(payload)) return null;
+  const bytes = Buffer.from(payload, 'base64url');
+  return bytes.length > 0 && bytes.toString('base64url') === payload ? bytes[0] : null;
 }
 
 async function body(request) {
@@ -160,6 +167,14 @@ export async function createServer({ pool, bootstrapToken, privateJwk, powersync
       if (path === null) throw new HttpError(400, 'Invalid path');
       const method = request.method;
       let match;
+
+      if (path === '/' && ['GET', 'HEAD'].includes(method)) {
+        const url = new URL(request.url, issuer);
+        if (url.searchParams.has('link')) {
+          response.setHeader('Vary', [response.getHeader('Vary'), 'Accept', 'User-Agent'].filter(Boolean).join(', '));
+          if (wantsTerminal(request)) return await terminalLink(pool, request, response, url);
+        }
+      }
 
       if (method === 'GET' && path === '/health') {
         await pool.query('SELECT 1');
@@ -330,10 +345,10 @@ export async function createServer({ pool, bootstrapToken, privateJwk, powersync
       if ((match = path.match(/^\/api\/links\/([^/]+)(\/reveal)?$/))) {
         const id = uuid(match[1]);
         if (method === 'GET' && !match[2]) {
-          const { rows } = await pool.query('SELECT expires_at, burned_at FROM items WHERE id = $1 AND kind = \'link\'', [id]);
+          const { rows } = await pool.query('SELECT expires_at, burned_at, payload FROM items WHERE id = $1 AND kind = \'link\'', [id]);
           if (!rows[0]) throw new HttpError(404, 'Link unavailable');
           if (rows[0].burned_at || new Date(rows[0].expires_at).getTime() <= Date.now()) throw new HttpError(410, 'Link consumed or expired');
-          return json(response, 200, { expires_at: rows[0].expires_at });
+          return json(response, 200, { expires_at: rows[0].expires_at, protocol_version: linkProtocolVersion(rows[0].payload) });
         }
         if (method === 'POST' && match[2]) {
           rateLimit(request);

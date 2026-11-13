@@ -1,0 +1,28 @@
+[package]
+name = "powerbin-cli-crypto"
+version = "0.1.0"
+license = "CC0-1.0"
+edition = "2024"
+rust-version = "1.88"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+native-shell-crypto = { path = "../../crypto" }
+js-sys = "=0.3.106"
+wasm-bindgen = "=0.2.129"
+zeroize = "1"
+
+[dev-dependencies]
+base64 = "0.22"
+serde_json = "1"
+
+[profile.release]
+lto = true
+opt-level = "s"
+codegen-units = 1
+strip = true
