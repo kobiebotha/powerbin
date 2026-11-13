@@ -1,0 +1,17 @@
+{
+  "name": "powerbin-server",
+  "license": "CC0-1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node --env-file-if-exists=../.env src/index.js",
+    "migrate": "node --env-file-if-exists=../.env scripts/migrate.js",
+    "test": "node --test test/domain.test.js test/web.test.js test/terminal.test.js test/links.test.js test/signing-key.test.js",
+    "test:integration": "node --env-file-if-exists=../.env --test test/integration.test.js"
+  },
+  "dependencies": {
+    "jose": "latest",
+    "pg": "latest"
+  }
+}

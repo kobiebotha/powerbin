@@ -1,0 +1,6 @@
+type: self-hosted
+api_url: !env POWERSYNC_URL
+api_key: !env PS_ADMIN_TOKEN
+plugins:
+  docker:
+    project_name: powerbin_local

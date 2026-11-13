@@ -1,0 +1,32 @@
+# Database module: PostgreSQL for replication source (logical replication).
+# Paths are relative to this file's directory when using include (Compose resolves from the included file).
+# Include from main: path: modules/database-postgres/postgres.database.compose.yaml
+
+services:
+  pg-db:
+    image: postgres:18
+    restart: always
+    environment:
+      - POSTGRES_USER=${PS_DATABASE_USER}
+      - POSTGRES_DB=${PS_DATABASE_NAME}
+      - POSTGRES_PASSWORD=${PS_DATABASE_PASSWORD}
+      - POWERBIN_APP_PASSWORD=${PS_APP_PASSWORD}
+      - POWERBIN_REPLICATION_PASSWORD=${PS_REPLICATION_PASSWORD}
+      - PGPORT=${PS_DATABASE_PORT}
+    volumes:
+      - pg_data:/var/lib/postgresql
+      - ./init-scripts/01-powersync-publication.sql:/docker-entrypoint-initdb.d/01-powersync-publication.sql:ro
+      - ./init-scripts/02-roles.sh:/docker-entrypoint-initdb.d/02-roles.sh:ro
+      - ../../../../server/migrations/001.sql:/docker-entrypoint-initdb.d/00-schema-001.sql:ro
+      - ../../../../server/migrations/002.sql:/docker-entrypoint-initdb.d/00-schema-002.sql:ro
+    ports:
+      - '${PS_DATABASE_PORT}:${PS_DATABASE_PORT}'
+    command: ['postgres', '-c', 'wal_level=logical']
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${PS_DATABASE_USER} -d ${PS_DATABASE_NAME}']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pg_data:

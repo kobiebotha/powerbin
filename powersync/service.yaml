@@ -1,0 +1,31 @@
+name: powerbin-local
+_type: self-hosted
+port: !env PS_PORT::number
+
+replication:
+  connections:
+    - type: postgresql
+      uri: !env PS_DATA_SOURCE_URI
+      sslmode: disable
+
+storage:
+  type: postgresql
+  uri: !env PS_STORAGE_SOURCE_URI
+  sslmode: disable
+
+sync_config:
+  path: sync-config.yaml
+
+client_auth:
+  audience: [powersync]
+  jwks:
+    keys:
+      - kty: OKP
+        crv: Ed25519
+        alg: EdDSA
+        use: sig
+        kid: powerbin
+        x: !env PS_JWT_PUBLIC_X
+
+api:
+  tokens: [!env PS_ADMIN_TOKEN]

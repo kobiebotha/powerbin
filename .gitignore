@@ -1,0 +1,11 @@
+.env
+.env.*
+!.env.example
+.tools/
+.cache/
+node_modules/
+.pnpm-store/
+target/
+.nsh/
+dist/
+.DS_Store

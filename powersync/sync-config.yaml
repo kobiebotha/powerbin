@@ -1,0 +1,14 @@
+config:
+  edition: 3
+
+with:
+  active_device: SELECT id FROM devices WHERE id = auth.user_id() AND revoked_at IS NULL
+
+streams:
+  personal:
+    auto_subscribe: true
+    queries:
+      - SELECT * FROM items WHERE recipient_id IN active_device
+      - SELECT * FROM items WHERE sender_id IN active_device
+      - SELECT * FROM items WHERE kind = 'saved' AND auth.user_id() IN active_device
+      - SELECT id, name, public_key, admission, created_at, revoked_at FROM devices WHERE auth.user_id() IN active_device

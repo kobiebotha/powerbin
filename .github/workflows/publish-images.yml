@@ -1,0 +1,163 @@
+name: Publish container images
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Build and smoke test
+    if: github.event_name != 'workflow_dispatch' || github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Set up standalone pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          # Read the pinned version from package.json; never use Corepack.
+          standalone: true
+          run_install: false
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run unit tests
+        run: pnpm test
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+
+      - name: Build PowerBin
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: Dockerfile
+          # The packaged NSH SDK is Linux x86_64 only.
+          platforms: linux/amd64
+          pull: true
+          load: true
+          tags: powerbin:release
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=powerbin
+          cache-to: type=gha,scope=powerbin,mode=max
+
+      - name: Build source Postgres
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: railway/postgres.Dockerfile
+          platforms: linux/amd64
+          pull: true
+          load: true
+          tags: powerbin-postgres:release
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=powerbin-postgres
+          cache-to: type=gha,scope=powerbin-postgres,mode=max
+
+      - name: Build PowerSync
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          file: railway/powersync.Dockerfile
+          platforms: linux/amd64
+          pull: true
+          load: true
+          tags: powerbin-powersync:release
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=powerbin-powersync
+          cache-to: type=gha,scope=powerbin-powersync,mode=max
+
+      - name: Pull storage Postgres
+        run: docker pull --platform linux/amd64 postgres:18
+
+      - name: Smoke test the release stack
+        run: node railway/smoke.mjs
+
+      - name: Save tested images
+        if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        run: |
+          docker save powerbin:release powerbin-postgres:release powerbin-powersync:release |
+            gzip -1 > "$RUNNER_TEMP/powerbin-images.tar.gz"
+
+      - name: Upload tested images
+        if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: powerbin-images
+          path: ${{ runner.temp }}/powerbin-images.tar.gz
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    name: Publish tested images
+    needs: validate
+    if: github.ref == 'refs/heads/master' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download tested images
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: powerbin-images
+          path: ${{ runner.temp }}/release-images
+
+      - name: Load tested images
+        run: docker load --input "$RUNNER_TEMP/release-images/powerbin-images.tar.gz"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish commit tags, then latest
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          namespace="ghcr.io/${OWNER,,}"
+          images=(powerbin powerbin-postgres powerbin-powersync)
+          for image in "${images[@]}"; do
+            docker tag "$image:release" "$namespace/$image:sha-$GITHUB_SHA"
+            docker push "$namespace/$image:sha-$GITHUB_SHA"
+          done
+          # Move latest only after every image's commit tag was published.
+          for image in "${images[@]}"; do
+            docker tag "$image:release" "$namespace/$image:latest"
+            docker push "$namespace/$image:latest"
+          done
