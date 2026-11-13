@@ -70,7 +70,7 @@ test('reveals a Rust-created message with one POST and keeps the key local', asy
   const result = await command(['reveal', endpoint.url]);
   assert.equal(result.code, 0, result.stderr);
   assert.deepEqual(result.stdout, Buffer.from(fixture.plaintext));
-  assert.match(result.stderr, /server copy has burned/);
+  assert.equal(result.stderr, '');
   assert.equal(endpoint.requests.length, 2);
   assert.deepEqual(endpoint.requests.map(request => request.method), ['GET', 'POST']);
   assert.equal(endpoint.requests[0].path, `/api/links/${fixture.id}`);

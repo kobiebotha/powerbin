@@ -18,7 +18,7 @@ Options:
   -v, --version Show the package version
 
 The decryption key stays on this computer. Revealing consumes the link once.
-Piped output contains only the exact message bytes; status goes to stderr.
+Piped output contains only the exact message bytes; errors go to stderr.
 `;
 
 interface Arguments { url?: string; stdin: boolean; raw: boolean }
@@ -81,7 +81,6 @@ async function main(): Promise<void> {
     } else {
       await writeMessage(plaintext);
     }
-    if (!options.raw) process.stderr.write('Revealed. The server copy has burned.\n');
   } catch {
     throw new CliError('The message was revealed, but writing it to standard output failed. The link has already burned.');
   } finally {

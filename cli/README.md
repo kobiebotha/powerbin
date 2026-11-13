@@ -15,9 +15,9 @@ never sent to the server.
 
 ## Output and scripting
 
-In a terminal, PowerBin prints the message with a short status. When stdout is
+In a terminal, PowerBin prints a short heading followed by the message. When stdout is
 piped or redirected, it contains the exact UTF-8 message bytes, including the
-original newlines. Status and errors go to stderr.
+original newlines. Terminal headings and errors go to stderr.
 
 ```sh
 pnpx powerbin reveal '<complete link>' > message.txt
@@ -26,7 +26,7 @@ pnpx powerbin --help
 pnpx powerbin --version
 ```
 
-`--raw` writes exact bytes even in a terminal and suppresses the success status.
+`--raw` writes exact bytes even in a terminal and suppresses the heading.
 Normal terminal output escapes control characters from the message. Raw output
 is intended for scripts and trusted text.
 
