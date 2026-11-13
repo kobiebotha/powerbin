@@ -1,5 +1,9 @@
 # Needs validation
 
+> These are the original audit leads. Current local fixes, regression checks,
+> deployment requirements, and residual risks are recorded in
+> [REPORT.md, section 8](REPORT.md#8-local-remediation--13-november-2026).
+
 These are source-grounded leads whose decisive check is outside what this audit could observe. They carry no severity and are not confirmed vulnerabilities. Do not send audit traffic to a live deployment; the deployment checks below are things the owner observes on their own systems.
 
 ## App accepts a plain-HTTP server origin for any host and sends the setup token and device bearer over it

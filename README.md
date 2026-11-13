@@ -131,6 +131,24 @@ Native device secrets live in the OS credential store; remembered browser
 secrets live in IndexedDB for that origin. Losing all device keys loses access
 to saved snippets. There is no recovery flow.
 
+Unpairing saves the removed device's id and public key in this device's session
+before asking the server to revoke access. This device will reject that identity
+after restart even if the server replays its old row or admits the same key with
+a different id. The local block remains if the server request fails; the app
+reports that server revocation was not confirmed. These local decisions are not
+synced, so other devices still rely on honest server revocation. Clearing the
+local session also clears its decisions.
+
+The local block covers only recorded ids and public keys. Unpairing does not
+rotate the shared group key. A removed device that retains that key can work with
+a malicious server to create a fresh id and key with a valid admission tag. That
+new identity can be trusted even by the device that performed the unpair. The
+removed device can also decrypt future saved snippets encrypted with the retained
+group key if it obtains their ciphertext, and it keeps prior copies. Complete
+cryptographic revocation requires key rotation and an authenticated membership
+protocol. The persisted block is a safeguard against replay of known identities,
+not a replacement for those protocol changes.
+
 Directed transfers expire after one hour; guest links expire after 48 hours.
 Guest mode opens no local PowerSync database. Opening a link checks availability;
 **Reveal & burn** atomically claims its ciphertext once. An ambiguous network

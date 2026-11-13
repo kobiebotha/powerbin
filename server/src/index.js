@@ -20,6 +20,7 @@ const server = await createServer({
   powersyncUrl: POWERSYNC_URL,
   issuer: process.env.API_ORIGIN || 'http://localhost:8080',
   webDist: process.env.WEB_DIST,
+  trustedProxyHeader: process.env.TRUST_PROXY_HEADER || null,
   allowedOrigins: (process.env.ALLOWED_ORIGINS || '').split(',').filter(Boolean)
 });
 server.listen(Number(process.env.PORT || 8080), process.env.HOST || '0.0.0.0', () => {

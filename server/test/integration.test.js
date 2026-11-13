@@ -23,14 +23,14 @@ test('device authorization and transfer lifecycle', { skip: !process.env.TEST_DA
   const { privateKey } = await generateKeyPair('EdDSA', { extractable: true });
   const setupToken = randomBytes(32).toString('base64url');
   const issuer = 'https://powerbin.test';
-  server = await createServer({ pool, bootstrapToken: setupToken, privateJwk: await exportJWK(privateKey), powersyncUrl: 'https://sync.test', issuer });
+  server = await createServer({ pool, bootstrapToken: setupToken, privateJwk: await exportJWK(privateKey), powersyncUrl: 'https://sync.test', issuer, trustedProxyHeader: 'x-real-ip' });
   server.listen(0, '127.0.0.1');
   await once(server, 'listening');
   const base = `http://127.0.0.1:${server.address().port}`;
   async function request(path, { method = 'GET', token, body } = {}) {
     const response = await fetch(base + path, {
       method,
-      headers: { ...(token && { Authorization: `Bearer ${token}` }), ...(body && { 'Content-Type': 'application/json' }) },
+      headers: { 'X-Forwarded-Proto': 'https', ...(token && { Authorization: `Bearer ${token}` }), ...(body && { 'Content-Type': 'application/json' }) },
       body: body ? JSON.stringify(body) : undefined
     });
     return { status: response.status, body: await response.json() };
@@ -149,11 +149,19 @@ test('device authorization and transfer lifecycle', { skip: !process.env.TEST_DA
     assert.equal(rows[0].burn_reason, 'consumed');
   });
 
-  await t.test('guest GET does not consume and concurrent reveals return ciphertext at most once', async () => {
+  await t.test('HTTP reveal is rejected and concurrent HTTPS reveals return ciphertext at most once', async () => {
     const createdAt = Date.now() - 2 * 60 * 60_000;
     const item = mutation(mac, { kind: 'link', recipient_id: null, created_at: new Date(createdAt).toISOString(),
       expires_at: new Date(createdAt + 48 * 60 * 60_000).toISOString() });
     assert.equal((await upload(mac, item)).body.accepted, true);
+    const insecure = await fetch(`${base}/api/links/${item.id}/reveal`, {
+      method: 'POST', headers: { 'X-Forwarded-Proto': 'http' }
+    });
+    assert.equal(insecure.status, 403);
+    assert.deepEqual(await insecure.json(), { error: 'HTTPS required' });
+    const stored = await pool.query('SELECT payload, burned_at FROM items WHERE id = $1', [item.id]);
+    assert.equal(stored.rows[0].payload, item.opData.payload);
+    assert.equal(stored.rows[0].burned_at, null);
     const metadata = await request(`/api/links/${item.id}`);
     assert.equal(metadata.status, 200);
     assert.equal(metadata.body.expires_at, item.opData.expires_at);

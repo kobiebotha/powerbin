@@ -1,5 +1,8 @@
 # PowerBin security audit: run 1
 
+> Local remediation is tracked in section 8 below. The original audit evidence
+> and deployment checks are preserved as the historical record of this run.
+
 ## 1. Run profile and scope
 
 | | |
@@ -180,3 +183,37 @@ These are not findings. They are grouped by area, most useful first.
 The first critic accepted three missing units and no reassignments; all three were hunted. The second critic accepted nothing. A separate final-clean critic did not run, so this coverage is partial.
 
 Ledger and findings both pass the skill's validators. Machine-readable records are in `findings.json` and `coverage-ledger.json`; sandbox logs are under `agents/*/artifacts/`.
+
+## 8. Local remediation — 13 November 2026
+
+These changes apply to the source checkout. They have not been published or
+deployed, and do not establish that any existing installation was exposed.
+The separate hardening notes in section 6 remain a backlog.
+
+| Finding | Source change | Remaining limit |
+| --- | --- | --- |
+| App sends credentials to a remote HTTP origin | Shared native/browser transport validation rejects non-loopback HTTP before creating requests. New and restored sessions, API actions, and sync connectors validate destinations. API requests refuse redirects. An HTTPS API requires an HTTPS sync endpoint, including credential refresh responses. | Existing remote-HTTP sessions must be corrected to the same server's HTTPS origin; the setup recovery flow preserves their identity, keys, token, and denylist without contacting the old URL. Localhost HTTP remains available for development. |
+| Rate limiter shares a proxy's TCP address and a budget across routes | Explicit `TRUST_PROXY_HEADER` selects `x-real-ip` or the rightmost `x-forwarded-for` address; the default ignores forwarded headers. Pairing, bootstrap, and reveal have separate per-client budgets and return `Retry-After`. Invalid and scoped forwarded IPs fall back to the TCP peer; equivalent IPv6 spellings share a budget. | Existing Railway installations need `TRUST_PROXY_HEADER=x-real-ip` when adopting the new server. Only a proxy that overwrites the selected header and `X-Forwarded-Proto` may reach the public backend port. Limits remain process-local. |
+| App can be framed | All server responses include `Content-Security-Policy: frame-ancestors 'none'` and `X-Frame-Options: DENY`. | Deploy the updated server so these headers reach the browser. |
+| Removed device rows can be replayed after restart | The acting device persists blocked device IDs and public keys before sending DELETE; restored trust, transfer recipients, and incoming sender checks reject them. Network failures cannot undo the block. | **Known-identity replay is mitigated, not full cryptographic revocation.** Other devices still rely on server revocation. A removed group-key holder working with a malicious server can forge an admission for a fresh identity even on the acting device, and retains shared-key access to saved ciphertext. Full closure needs key rotation and authenticated, rollback-resistant membership updates. |
+| Burned ciphertext persists in sync history without compaction | The PowerSync image is pinned to 1.26.0 and supervises startup plus hourly compaction with no overlap, bounded job duration, retries, and clean shutdown. The Railway template inherits the image entrypoint; local Compose builds the same image. CI checks the schedule and actual storage cleanup. | Compaction runs after replication and can be delayed by failed jobs. It does not erase offline copies, database journals, or backups. This PostgreSQL bucket storage uses v2; self-hosted v4 requires MongoDB storage. |
+
+Validation completed:
+
+- `pnpm test`: 40 server, 12 browser-adapter, and 9 scheduler tests pass.
+- The real Postgres integration suite passes 12 tests, including an HTTP reveal
+  that leaves ciphertext and burn state unchanged before a successful HTTPS reveal.
+- The native app passes 25 unit tests. Dummy listeners observe no forbidden HTTP
+  request or redirect replay; persistence tests cover session correction and
+  known-identity revocation replay after restart.
+- Web type-check and production build, WebAssembly `cargo check`, and Rust
+  formatting checks pass. The unpair UI also passed `nsh check app`.
+- The updated Linux amd64 PowerSync image builds. A disposable two-database test
+  reproduces superseded ciphertext retained without compaction, restarts the test
+  service under the default image supervisor, and confirms automatic compaction
+  clears that ciphertext while preserving current unburned ciphertext. Test
+  containers, network, and temporary configuration are removed afterward.
+
+No credential-bearing audit traffic was sent to a deployed service. Existing
+installations need rebuilt clients, the new images, and the proxy setting above;
+editing this checkout does not update remote Railway templates or deployments.

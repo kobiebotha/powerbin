@@ -8,7 +8,7 @@
     "setup": "node scripts/setup-env.mjs",
     "ps": "node --env-file=.env node_modules/powersync/bin/run.js",
     "migrate": "pnpm --filter powerbin-server migrate",
-    "test": "pnpm --filter powerbin-server test && pnpm --filter powerbin-web-sync test",
+    "test": "pnpm --filter powerbin-server test && pnpm --filter powerbin-web-sync test && node --test railway/powersync-supervisor.test.mjs",
     "test:integration": "pnpm --filter powerbin-server test:integration",
     "cli:build": "pnpm --filter powerbin build",
     "cli:test": "pnpm --filter powerbin test",

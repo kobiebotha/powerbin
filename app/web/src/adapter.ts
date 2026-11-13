@@ -1,6 +1,8 @@
 import { column, PowerSyncDatabase, Schema, SyncStreamConnectionMethod, Table, WASQLiteVFS } from '@powersync/web';
 import type { PowerSyncBackendConnector } from '@powersync/web';
+import { syncEndpoint, origin, request as backendRequest } from './transport';
 export { load, save, copy } from './vault';
+export { request } from './transport';
 
 // Mirrors app/src/schema.rs. PowerSync adds the id column automatically.
 const schema = new Schema({
@@ -103,6 +105,7 @@ function report(error: unknown): void {
 
 /** Opens the persistent local database; sync starts in the background. */
 export async function connect(config: Config): Promise<void> {
+  origin(config.backend_url);
   if (opening) {
     if (JSON.stringify(config) !== JSON.stringify(activeConfig)) {
       throw new Error('PowerBin is already connected as another device; reload to switch devices');
@@ -118,25 +121,17 @@ export async function connect(config: Config): Promise<void> {
 }
 
 async function open(config: Config): Promise<void> {
-  const endpoint = new URL(config.backend_url);
+  origin(config.backend_url);
   const request = async <T>(path: string, body?: unknown): Promise<T> => {
-    const response = await fetch(new URL(path, endpoint), {
-      method: body === undefined ? 'GET' : 'POST',
-      headers: {
-        Authorization: `Bearer ${config.device_token}`,
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' })
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) })
-    });
-    const value = await response.json() as T & { error?: string };
-    if (!response.ok) throw new Error(value.error || `PowerBin backend returned ${response.status}`);
-    return value;
+    return JSON.parse(await backendRequest(config.backend_url, config.device_token, path,
+      body === undefined ? 'GET' : 'POST', body === undefined ? undefined : JSON.stringify(body))) as T;
   };
 
   const connector: PowerSyncBackendConnector = {
     async fetchCredentials() {
       const session = await request<Session>('/api/session');
       if (session.device.id !== config.device_id) throw new Error('Device credentials do not match');
+      syncEndpoint(config.backend_url, session.powersync.endpoint);
       return {
         endpoint: session.powersync.endpoint,
         token: session.powersync.token,

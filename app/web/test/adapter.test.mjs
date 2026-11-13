@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { createServer } from 'node:http';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createContext, SourceTextModule, SyntheticModule } from 'node:vm';
@@ -14,6 +15,7 @@ const sdk = await import(require.resolve('@powersync/web'));
 const webRoot = fileURLToPath(new URL('../', import.meta.url));
 const output = mkdtempSync(join(tmpdir(), 'powerbin-adapter-test-'));
 let adapterSource;
+let transportSource;
 try {
   // TypeScript 7 exposes its compiler through the CLI rather than transpileModule.
   execFileSync(process.execPath, [
@@ -22,6 +24,7 @@ try {
     '--outDir', output, process.env.POWERBIN_ADAPTER_SOURCE || join(webRoot, 'src/adapter.ts')
   ], { cwd: webRoot, stdio: 'pipe' });
   adapterSource = readFileSync(join(output, 'adapter.js'), 'utf8');
+  transportSource = readFileSync(join(output, 'transport.js'), 'utf8');
 } finally {
   rmSync(output, { recursive: true, force: true });
 }
@@ -73,7 +76,7 @@ function createSqlite(items = [], devices = []) {
 }
 const result = rows => ({ rows: { _array: rows, length: rows.length, item: index => rows[index] } });
 
-async function harness(t, { items = [], devices = [] } = {}) {
+async function harness(t, { items = [], devices = [], fetch: fetchRequest = fetch } = {}) {
   let database;
   class TestDatabase {
     constructor() {
@@ -98,7 +101,11 @@ async function harness(t, { items = [], devices = [] } = {}) {
     }
     async init() {}
     async waitForReady() {}
-    async connect() { this.connectCalls++; }
+    async connect(connector, options) {
+      this.connectCalls++;
+      this.connector = connector;
+      this.connectOptions = options;
+    }
     registerListener(listener) {
       this.listeners.add(listener);
       return () => this.listeners.delete(listener);
@@ -164,7 +171,7 @@ async function harness(t, { items = [], devices = [] } = {}) {
     'handleTableChanges', 'executeReadOnly'
   ]) TestDatabase.prototype[method] = sdk.PowerSyncDatabase.prototype[method];
 
-  const context = createContext({ console, URL, setTimeout, clearTimeout, AbortController });
+  const context = createContext({ console, URL, setTimeout, clearTimeout, AbortController, fetch: fetchRequest });
   const web = new SyntheticModule(['column', 'PowerSyncDatabase', 'Schema', 'SyncStreamConnectionMethod', 'Table', 'WASQLiteVFS'], function () {
     for (const key of ['column', 'Schema', 'SyncStreamConnectionMethod', 'Table', 'WASQLiteVFS']) this.setExport(key, sdk[key]);
     this.setExport('PowerSyncDatabase', TestDatabase);
@@ -173,9 +180,11 @@ async function harness(t, { items = [], devices = [] } = {}) {
     for (const key of ['load', 'save', 'copy']) this.setExport(key, async () => {});
   }, { context });
   const module = new SourceTextModule(adapterSource, { context, identifier: 'adapter.js' });
+  const transport = new SourceTextModule(transportSource, { context, identifier: 'transport.js' });
   await module.link(specifier => {
     if (specifier === '@powersync/web') return web;
     if (specifier === './vault') return vault;
+    if (specifier === './transport') return transport;
     throw new Error(`Unexpected adapter import: ${specifier}`);
   });
   await module.evaluate();
@@ -184,6 +193,70 @@ async function harness(t, { items = [], devices = [] } = {}) {
   const connect = () => adapter.connect({ backend_url: 'https://example.test', device_id: 'recipient', device_token: 'synthetic-token' });
   return { adapter, connect, get db() { return database; } };
 }
+
+test('unsafe backend origins fail before opening the database or sending credentials', async t => {
+  let requests = 0;
+  const h = await harness(t, { fetch: async () => { requests++; throw new Error('Unexpected request'); } });
+  for (const backend_url of ['http://example.test', 'http://192.0.2.1', 'http://localhost.attacker.test', 'https://user:secret@example.test']) {
+    await assert.rejects(h.adapter.connect({ backend_url, device_id: 'recipient', device_token: 'dummy-device-token' }), /HTTPS|credentials/);
+    await assert.rejects(h.adapter.request(backend_url, 'dummy-setup-token', '/api/bootstrap', 'POST', '{"device_token":"dummy-device-token"}'), /HTTPS|credentials/);
+  }
+  assert.equal(requests, 0);
+  assert.equal(h.db, undefined);
+});
+
+test('sync credentials validate the returned endpoint and API fetches refuse redirects', async t => {
+  let syncEndpoint = 'http://sync.example.test';
+  const calls = [];
+  const h = await harness(t, { fetch: async (url, options) => {
+    calls.push({ url: String(url), options });
+    return new Response(JSON.stringify({ device: { id: 'recipient' }, powersync: {
+      endpoint: syncEndpoint, token: 'dummy-sync-token', expires_at: '2026-11-13T23:59:59Z'
+    } }));
+  } });
+  await h.connect();
+  await assert.rejects(h.db.connector.fetchCredentials(), /HTTPS/);
+  assert.equal(calls[0].url, 'https://example.test/api/session');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer synthetic-token');
+  assert.equal(calls[0].options.redirect, 'error');
+  syncEndpoint = 'http://127.0.0.1:8080';
+  await assert.rejects(h.db.connector.fetchCredentials(), /HTTPS sync endpoint/);
+  syncEndpoint = 'ws://sync.example.test';
+  await assert.rejects(h.db.connector.fetchCredentials(), /HTTPS/);
+  syncEndpoint = 'https://sync.example.test';
+  assert.equal((await h.db.connector.fetchCredentials()).endpoint, syncEndpoint);
+  assert.equal(h.db.connectOptions.connectionMethod, sdk.SyncStreamConnectionMethod.WEB_SOCKET);
+});
+
+test('real HTTP listeners receive no forbidden credentials or redirected request replay', async t => {
+  const requests = [];
+  const listener = createServer((request, response) => {
+    requests.push({ url: request.url, authorization: request.headers.authorization });
+    response.setHeader('Content-Type', 'application/json');
+    response.end('{}');
+  });
+  await new Promise(resolve => listener.listen(0, '0.0.0.0', resolve));
+  t.after(() => new Promise(resolve => listener.close(resolve)));
+  const port = listener.address().port;
+  const h = await harness(t);
+  for (const [method, body] of [['GET'], ['POST', '{"device_token":"dummy-device-token"}']]) {
+    await assert.rejects(h.adapter.request(`http://127.0.0.2:${port}`, 'dummy-setup-token', '/api/bootstrap', method, body), /HTTPS/);
+  }
+  assert.deepEqual(requests, []);
+  // Local development is still usable with the exact same credentialed path.
+  assert.equal(await h.adapter.request(`http://127.0.0.1:${port}`, 'dummy-device-token', '/api/session', 'GET'), '{}');
+  assert.deepEqual(requests, [{ url: '/api/session', authorization: 'Bearer dummy-device-token' }]);
+
+  const redirect = createServer((request, response) => {
+    request.resume();
+    response.writeHead(307, { Location: `http://127.0.0.1:${port}/capture` });
+    response.end();
+  });
+  await new Promise(resolve => redirect.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => redirect.close(resolve)));
+  await assert.rejects(h.adapter.request(`http://127.0.0.1:${redirect.address().port}`, 'dummy-setup-token', '/api/bootstrap', 'POST', '{"device_token":"dummy-device-token"}'), /fetch failed/);
+  assert.equal(requests.length, 1, 'the redirect target never receives the bearer or POST body');
+});
 
 test('existing and late subscribers receive complete initial watched rows', async t => {
   const h = await harness(t, { items: [item('newer'), item('older')], devices: [device('sender')] });

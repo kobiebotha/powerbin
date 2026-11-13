@@ -200,6 +200,11 @@
           "description": "Listen on IPv6 and IPv4 for Railway private networking",
           "defaultValue": "::"
         },
+        "TRUST_PROXY_HEADER": {
+          "isOptional": false,
+          "description": "Trust Railway's overwritten client IP and HTTPS headers; expose PowerBin only through Railway's edge",
+          "defaultValue": "x-real-ip"
+        },
         "DATABASE_URL": {
           "isOptional": false,
           "description": "Private source database connection using the restricted application role",

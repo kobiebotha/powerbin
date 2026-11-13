@@ -121,7 +121,7 @@ export function Devices(props: { state: State }) {
         <If when={unpairing() === device().id}>
           <View style={{ paddingTop: 14, marginTop: 6, gap: 12, borderTopWidth: 1, borderColor: color.line }}>
             <Text style={{ ...mono, fontSize: 13, color: color.ink }}>{`Unpair ${device().name}?`}</Text>
-            <Text style={{ ...small, lineHeight: 19 }}>Stops future server access. Offline and copied data may remain on that device.</Text>
+            <Text style={{ ...small, lineHeight: 19 }}>This device remembers the block and asks the server to stop access. Other devices rely on server revocation. Offline and copied data remain; shared keys are not rotated.</Text>
             <View style={row}>
               <Action label="Unpair device" state={props.state} destructive action="unpairDevice" id={device().id} />
               <Button

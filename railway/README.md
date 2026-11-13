@@ -173,6 +173,7 @@ PS_ADMIN_TOKEN=${{secret(48)}}
 ```dotenv
 PORT=8080
 HOST=::
+TRUST_PROXY_HEADER=x-real-ip
 DATABASE_URL=postgresql://powerbin_app:${{postgres.POWERBIN_APP_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/powerbin
 API_ORIGIN=https://${{RAILWAY_PUBLIC_DOMAIN}}
 POWERSYNC_URL=https://${{powersync.RAILWAY_PUBLIC_DOMAIN}}
@@ -182,6 +183,16 @@ JWT_PRIVATE_JWK_FILE=/data/signing-key.json
 
 The configuration requests public domains for `powerbin` and `powersync`. `HOST=::`
 allows PowerBin to accept Railway private-network IPv6 requests from PowerSync.
+`TRUST_PROXY_HEADER=x-real-ip` enables Railway's client-IP and HTTPS forwarding
+headers. Railway must overwrite `X-Real-IP` and `X-Forwarded-Proto`, and the public
+backend must be reachable only through that trusted edge. The setting is off by
+default outside this template. A single immediate proxy that appends the real
+peer address as the rightmost `X-Forwarded-For` entry can instead use
+`TRUST_PROXY_HEADER=x-forwarded-for`. Pairing, bootstrap, and reveal each have
+their own per-client budget of 30 requests per minute. Existing installations
+must set the variable when adopting the updated image; this source change does
+not update running projects.
+
 The source database initializes the schema, `powerbin_app` restricted write role,
 `powerbin_sync` replication/read role, and `powersync` publication only on a fresh
 volume. The storage database is separate. Never expose either database publicly.
@@ -205,6 +216,35 @@ entering an API URL in the setup screen does not set that build-time value.
 The build script reads `.env`, rather than exported shell variables. Change only
 these public URL entries; keep deployed secrets out of local app builds.
 
+## Scheduled bucket cleanup
+
+The PowerSync image starts its sync service and a supervised compaction schedule
+together. After the service becomes ready, it runs the upstream `compact`
+command, then starts each subsequent successful cycle one hour after the
+previous job started. Job duration does not shift that hourly cadence, and jobs
+do not overlap;
+a failed run retries after five minutes and emits a failure status without
+connection strings. A job that runs for 30 minutes is terminated and retried,
+so a stalled database connection cannot stop cleanup indefinitely. Shutdown
+stops both the service and any running job.
+The local Docker stack builds this same image. The Railway template uses its
+default image entrypoint, so the schedule runs without a separate Railway cron
+service or start-command override. Existing deployments need the new image and
+a redeploy to adopt it; no running deployment is changed by editing the template.
+
+[Compaction](https://docs.powersync.com/maintenance-ops/compacting-buckets)
+removes superseded ciphertext from active sync bucket history after the burn
+has replicated. Cleanup is asynchronous: a normal successful cycle leaves up to
+about one hour plus replication and job duration before history is compacted;
+failed or stopped jobs can extend that period. Monitor the compaction success
+and failure messages. This is not immediate secure erasure: source/storage WAL,
+database backups, and copies already downloaded by clients have independent
+retention. Set backup/WAL retention for the deployment's requirements.
+
+This stack uses Postgres bucket storage (storage version 2). The faster chunked
+compaction described for storage version 4 requires MongoDB bucket storage in
+self-hosted deployments; it does not apply to this Postgres configuration.
+
 ## Build and verification
 
 The web builder uses Rust 1.99.1, Node 24, standalone pnpm 12.18.0, wasm-bindgen 0.2.129,
@@ -216,7 +256,7 @@ site. The strict `.dockerignore` allows source files only: no `.env`, `.tools`,
 local node_modules, generated site, target directory, or private keys enter builds.
 The browser derives its API URL from its own origin; no deployment secrets or
 domain-specific `.env` file are needed to build the site.
-PowerSync uses `journeyapps/powersync-service:latest`. The lockfile
+PowerSync uses the audit-tested `journeyapps/powersync-service:1.26.0`. The lockfile
 includes pnpm's platform packages as well as the frozen application dependencies.
 The Docker build includes the current `app/App.tsx` and `app/ui/` views; generated
 Native Shell files are rebuilt inside the image.
@@ -228,6 +268,7 @@ docker build --platform linux/amd64 -f railway/powersync.Dockerfile -t powerbin-
 docker pull postgres:18
 pnpm test
 node railway/smoke.mjs
+node railway/compaction-smoke.mjs
 ```
 
 The [release smoke check](smoke.mjs) creates its own labeled containers, network,
@@ -238,6 +279,14 @@ the current TSX entry and descriptor assets, PowerSync workers and SQLite WASM,
 HTTP MIME types, schema/publication/roles, health checks, authenticated bootstrap,
 JWT/JWKS, and signing-key persistence after container replacement. The runtime
 image is also checked for accidentally retained development files or secrets.
+
+The [compaction check](compaction-smoke.mjs) uses separate disposable source and
+storage databases. It reproduces retained superseded ciphertext without the
+schedule, restarts only its own test service with the image's default supervisor,
+then checks that automatic compaction removes the old payload while preserving
+live ciphertext. It never reads `.env` or modifies a running installation. The
+[scheduler tests](powersync-supervisor.test.mjs) exercise hourly scheduling,
+readiness, retries, non-overlap, and signal handling without Docker.
 
 With the repository's native Rust prerequisites installed, exercise two real SDK
 clients against the same disposable stack:
