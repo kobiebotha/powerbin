@@ -1,3 +1,12 @@
+# Note from human author
+
+1. This project was built using GPT-Sol 6.1 Ultra
+4. No human code review has been performed yet
+2. This project was pentested using Fable 5.2 and Cloudflare's [Security Audit Skill](https://github.com/cloudflare/security-audit-skill), and all major findings have been addressed.
+3. I will probably look at issues since this is an app I'll be using myself regularly
+
+_Everything below this line was written by AI under human supervision_
+
 # PowerBin
 
 A self-hosted text relay built with Native Shell, PowerSync, and Postgres. Send
