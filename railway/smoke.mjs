@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createPublicKey, randomBytes, randomUUID, verify } from 'node:crypto';
+import { request as httpRequest } from 'node:http';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -76,6 +77,45 @@ async function request(origin, path, { method = 'GET', token, body } = {}) {
   });
   return { status: response.status, body: await response.json() };
 }
+function proxyRequest(origin, path, { method = 'GET', headers = {} } = {}) {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(new URL(path, origin), { method, headers }, response => {
+      const chunks = [];
+      response.on('data', chunk => chunks.push(chunk));
+      response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks).toString() }));
+      response.on('error', reject);
+    });
+    req.setTimeout(10_000, () => req.destroy(new Error('Custom-domain request timed out')));
+    req.on('error', reject);
+    req.end();
+  });
+}
+async function checkCustomDomain(origin, javascript) {
+  const browserOrigin = 'https://custom.powerbin.test';
+  const headers = { host: 'custom.powerbin.test', origin: browserOrigin, 'x-forwarded-proto': 'https' };
+  for (const path of javascript) {
+    const asset = await proxyRequest(origin, `/${path}`, { headers });
+    assert.equal(asset.status, 200, `Custom-domain browser module ${path}`);
+    assert.match(asset.headers['content-type'], /^text\/javascript/);
+    assert.equal(asset.headers['access-control-allow-origin'], browserOrigin);
+    assert.ok(asset.body.length > 0, `Nonempty custom-domain module ${path}`);
+  }
+  const session = await proxyRequest(origin, '/api/session', { headers });
+  assert.equal(session.status, 401, 'Custom-domain API reaches device authentication');
+  assert.equal(session.headers['access-control-allow-origin'], browserOrigin);
+  const preflight = await proxyRequest(origin, '/api/bootstrap', {
+    method: 'OPTIONS', headers: { ...headers, 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization,content-type' }
+  });
+  assert.equal(preflight.status, 204, 'Custom-domain API preflight');
+  assert.equal(preflight.headers['access-control-allow-origin'], browserOrigin);
+  const denied = await proxyRequest(origin, `/${javascript[0]}`, {
+    headers: { ...headers, origin: 'https://unrelated.powerbin.test' }
+  });
+  assert.equal(denied.status, 403, 'Unlisted cross-origin request remains blocked');
+  assert.deepEqual(JSON.parse(denied.body), { error: 'Origin not allowed' });
+  assert.equal(denied.headers['access-control-allow-origin'], undefined);
+  console.log('PASS: packaged browser modules and API accept a new HTTPS custom hostname without ALLOWED_ORIGINS; unrelated origins remain blocked');
+}
 function verifySession(session, jwks, device, issuer, endpoint) {
   const [header, payload, signature] = session.powersync.token.split('.');
   const claims = JSON.parse(Buffer.from(payload, 'base64url'));
@@ -92,6 +132,8 @@ async function checkSite(origin) {
   assert.match(html, /<title>PowerBin<\/title>/);
   const descriptor = JSON.parse(html.match(/const app = (\{[^\n]+\});/)?.[1] || 'null');
   assert.ok(descriptor?.code && descriptor.rust === false, 'Packaged entry is the current mixed TSX app');
+  const runtime = html.match(/import\s*\{\s*createPlayer\s*\}\s*from\s*["']\.\/([^"']+)["']/)?.[1];
+  assert.ok(descriptor.glue && runtime, 'Packaged browser entry references its JavaScript modules');
   const code = await fetch(`${origin}/${descriptor.code}`).then(response => response.text());
   assert.ok(code.includes('powerbin/native') && code.includes('PowerBin'), 'TSX bundle contains the Rust bridge');
   const files = JSON.parse(await docker(['exec', names.powerbin, 'node', '--input-type=module', '-e',
@@ -100,7 +142,7 @@ async function checkSite(origin) {
     'manifest.webmanifest', descriptor.code, descriptor.wasm, descriptor.glue, descriptor.host,
     ...Object.values(descriptor.data || {}), ...Object.values(descriptor.assets || {}),
     ...Object.values(descriptor.chunks || {}), ...Object.values(descriptor.sides || {}).map(side => side.url),
-    html.match(/import\s*\{\s*createPlayer\s*\}\s*from\s*["']\.\/([^"']+)["']/)?.[1]
+    runtime
   ].filter(Boolean));
   for (const path of references) assert.ok(files.includes(path), `NSH descriptor asset ${path} is packaged`);
   for (const font of [...(descriptor.fonts || []), ...Object.values(descriptor.chunkFonts || {}).flat()]) {
@@ -125,6 +167,7 @@ async function checkSite(origin) {
     "import { existsSync } from 'node:fs'; import { readdir } from 'node:fs/promises'; const found=['/workspace','/opt/nsh','/opt/pnpm','/usr/local/cargo','/root/.cargo','/root/.rustup','/usr/local/bin/rustc','/usr/local/bin/cargo','/app/node_modules/powersync'].filter(existsSync); async function walk(path) { for(const e of await readdir(path,{withFileTypes:true})) { if(e.name==='node_modules') continue; const name=path+'/'+e.name; if(/^(?:\\.env(?:\\..*)?|\\.git|\\.tools|target)$/.test(e.name) || /\\.(?:pem|key|p12)$|signing-key.*\\.json$/i.test(e.name)) found.push(name); else if(e.isDirectory()) await walk(name); } } await walk('/app'); console.log(JSON.stringify(found));"]));
   assert.ok(retained.length === 0, 'Runtime excludes development secrets, private key files, and build toolchains');
   console.log(`PASS: current TSX entry, descriptor assets/fonts/chunks, adapter, workers, and ${checked} served assets; runtime contains no development secrets or build toolchains`);
+  await checkCustomDomain(origin, [descriptor.glue, runtime]);
 }
 
 try {
@@ -153,7 +196,8 @@ try {
     PS_STORAGE_SOURCE_URI: `postgresql://powerbin_storage:${secrets.storage}@postgres:5432/powerbin`, PS_JWKS_URI: 'http://powerbin:8080/api/keys', PS_ADMIN_TOKEN: secrets.powersync },
   ['--publish', `127.0.0.1:${powersyncPort}:8080`]);
   const powerbinEnv = { PORT: '8080', HOST: '::', DATABASE_URL: `postgresql://powerbin_app:${secrets.app}@postgres:5432/powerbin`,
-    API_ORIGIN: apiOrigin, POWERSYNC_URL: syncOrigin, BOOTSTRAP_TOKEN: secrets.bootstrap, JWT_PRIVATE_JWK_FILE: '/data/signing-key.json' };
+    API_ORIGIN: apiOrigin, POWERSYNC_URL: syncOrigin, BOOTSTRAP_TOKEN: secrets.bootstrap, JWT_PRIVATE_JWK_FILE: '/data/signing-key.json',
+    TRUST_PROXY_HEADER: 'x-real-ip' };
   const powerbinArgs = ['--publish', `127.0.0.1:${powerbinPort}:8080`, '--mount', `type=volume,source=${volumes[1]},target=/data`];
   await run('powerbin', powerbinEnv, powerbinArgs);
   await ready('PowerBin health', async () => (await request(apiOrigin, '/health')).status === 200);

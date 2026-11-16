@@ -13,6 +13,13 @@ class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
 
+function sameHttpsOrigin(request, origin, secure) {
+  const host = request.headers.host;
+  if (!secure || typeof host !== 'string' || /[\\/?#@\s]/.test(host)) return false;
+  try { return origin === new URL(`https://${host}`).origin; }
+  catch { return false; }
+}
+
 const publicDevice = 'id, name, public_key, admission, created_at';
 const bearer = request => request.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]{1,128})$/)?.[1];
 const admission = value => value == null ? null : text(value, 'admission proof', 16 * 1024);
@@ -170,6 +177,7 @@ export async function createServer({ pool, bootstrapToken, privateJwk, powersync
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Content-Security-Policy', "frame-ancestors 'none'");
     response.setHeader('X-Frame-Options', 'DENY');
+    response.setHeader('Vary', 'Origin');
     try {
       // Forwarded protocol is trusted only when the operator configured a trusted proxy.
       const forwardedProto = request.headers['x-forwarded-proto'];
@@ -181,9 +189,9 @@ export async function createServer({ pool, bootstrapToken, privateJwk, powersync
 
       const origin = request.headers.origin;
       if (origin) {
-        if (!origins.has(origin)) throw new HttpError(403, 'Origin not allowed');
+        // The serving HTTPS host may differ from the canonical JWT issuer.
+        if (!origins.has(origin) && !sameHttpsOrigin(request, origin, secure)) throw new HttpError(403, 'Origin not allowed');
         response.setHeader('Access-Control-Allow-Origin', origin);
-        response.setHeader('Vary', 'Origin');
       }
       if (request.method === 'OPTIONS') {
         response.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');

@@ -165,3 +165,123 @@ test('forwarded HTTPS is not trusted without explicit proxy configuration', asyn
   assert.equal(response.status, 403);
   assert.equal(response.headers['strict-transport-security'], undefined);
 });
+
+test('HTTPS custom domains accept their own browser origin without changing the issuer', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'powerbin-custom-domain-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  await writeFile(join(directory, 'app.js'), 'export const powerbin = true;');
+  const server = await createServer({
+    ...config, webDist: directory, pool: { query: async () => ({ rows: [] }) },
+    allowedOrigins: ['https://trusted.frontend.test']
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const headers = {
+    host: 'powerbin.custom.test', origin: 'https://powerbin.custom.test',
+    'x-forwarded-proto': 'https'
+  };
+
+  await t.test('browser modules load on the HTTPS host serving the app', async () => {
+    const response = await send(server, '/app.js', { headers });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers['content-type'], 'text/javascript; charset=utf-8');
+    assert.equal(response.body, 'export const powerbin = true;');
+    assert.equal(response.headers['access-control-allow-origin'], 'https://powerbin.custom.test');
+  });
+
+  await t.test('same-origin APIs and preflights pass the origin check and retain authentication', async () => {
+    for (const [path, status] of [['/api/keys', 200], ['/api/session', 401]]) {
+      const response = await send(server, path, { headers });
+      assert.equal(response.status, status, path);
+      assert.equal(response.headers['access-control-allow-origin'], headers.origin);
+    }
+    const preflight = await send(server, '/api/bootstrap', {
+      method: 'OPTIONS', headers: { ...headers, 'access-control-request-method': 'POST' }
+    });
+    assert.equal(preflight.status, 204);
+    assert.equal(preflight.headers['access-control-allow-origin'], headers.origin);
+    assert.match(preflight.headers['access-control-allow-methods'], /POST/);
+  });
+
+  await t.test('host case, default HTTPS ports, and IPv6 use canonical origins', async () => {
+    for (const [host, origin] of [
+      ['POWERBIN.CUSTOM.TEST', 'https://powerbin.custom.test'],
+      ['powerbin.custom.test:443', 'https://powerbin.custom.test'],
+      ['powerbin.custom.test:8443', 'https://powerbin.custom.test:8443'],
+      ['[2001:db8::1]:443', 'https://[2001:db8::1]']
+    ]) {
+      assert.equal((await send(server, '/app.js', { headers: { ...headers, host, origin } })).status, 200, host);
+    }
+  });
+
+  await t.test('the configured issuer and additional cross-origin clients remain allowed', async () => {
+    for (const origin of [config.issuer, 'https://trusted.frontend.test']) {
+      const response = await send(server, '/app.js', { headers: { ...headers, origin } });
+      assert.equal(response.status, 200);
+      assert.equal(response.headers['access-control-allow-origin'], origin);
+    }
+  });
+
+  await t.test('unrelated, opaque, malformed, wrong-scheme, and wrong-port origins are rejected', async () => {
+    for (const [host, origin] of [
+      ['powerbin.custom.test', 'https://unrelated.test'],
+      ['powerbin.custom.test', 'http://powerbin.custom.test'],
+      ['powerbin.custom.test', 'https://powerbin.custom.test:8443'],
+      ['powerbin.custom.test:8443', 'https://powerbin.custom.test'],
+      ['powerbin.custom.test', 'null'],
+      ['powerbin.custom.test', 'https://powerbin.custom.test/'],
+      ['powerbin.custom.test', 'https://user@powerbin.custom.test'],
+      ['powerbin.custom.test', 'https://powerbin.custom.test https://unrelated.test']
+    ]) {
+      const response = await send(server, '/app.js', { headers: { ...headers, host, origin } });
+      assert.equal(response.status, 403, `${host} / ${origin}`);
+      assert.deepEqual(JSON.parse(response.body), { error: 'Origin not allowed' });
+      assert.equal(response.headers['access-control-allow-origin'], undefined);
+    }
+  });
+
+  await t.test('forwarded hosts and malformed Host authorities cannot authorize an origin', async () => {
+    const spoofed = await send(server, '/app.js', {
+      headers: { ...headers, host: 'other.test', 'x-forwarded-host': 'powerbin.custom.test' }
+    });
+    assert.equal(spoofed.status, 403);
+    for (const host of [
+      '', 'user@powerbin.custom.test', 'powerbin.custom.test/path', 'powerbin.custom.test\\path',
+      'powerbin.custom.test?query', 'powerbin.custom.test#fragment', 'powerbin.custom.test bad'
+    ]) {
+      assert.equal((await send(server, '/app.js', { headers: { ...headers, host } })).status, 403, host);
+    }
+  });
+
+  await t.test('custom origins cannot bypass the trusted HTTPS requirement', async () => {
+    for (const protocol of [undefined, 'http', 'https, http']) {
+      const untrusted = { ...headers };
+      if (protocol === undefined) delete untrusted['x-forwarded-proto'];
+      else untrusted['x-forwarded-proto'] = protocol;
+      const response = await send(server, '/app.js', { headers: untrusted });
+      assert.equal(response.status, 403);
+      assert.deepEqual(JSON.parse(response.body), { error: 'HTTPS required' });
+    }
+    const internalRead = { ...headers };
+    delete internalRead['x-forwarded-proto'];
+    assert.equal((await send(server, '/api/keys', { headers: internalRead })).status, 403);
+
+    const local = await createServer({
+      ...config, issuer: 'http://localhost:8080', webDist: directory,
+      pool: { query: async () => ({ rows: [] }) }
+    });
+    await new Promise(resolve => local.listen(0, '127.0.0.1', resolve));
+    t.after(() => new Promise(resolve => local.close(resolve)));
+    const plaintext = { host: 'powerbin.custom.test', origin: 'http://powerbin.custom.test' };
+    assert.equal((await send(local, '/app.js', { headers: plaintext })).status, 403);
+  });
+
+  await t.test('responses without Origin still vary on Origin for shared caches', async () => {
+    const withoutOrigin = { ...headers };
+    delete withoutOrigin.origin;
+    const response = await send(server, '/app.js', { headers: withoutOrigin });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.vary, 'Origin, Accept-Encoding');
+    assert.equal(response.headers['access-control-allow-origin'], undefined);
+  });
+});

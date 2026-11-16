@@ -28,7 +28,7 @@ PowerSync, and both databases. See [the Docker guide](docs/docker.md) for setup,
 persistent storage, updates, and hosting on your own server. No local application
 build toolchain is needed.
 
-The [Railway guide](railway/README.md) covers the four-service template and the
+The [Railway guide](railway/README.md) covers the three-service template and the
 GHCR images published after successful checks on `master`.
 
 ## Develop from source
@@ -100,12 +100,12 @@ the native app to point here, set `WEB_ORIGIN` to `http://localhost:18088` in
 
 ## Deploy on Railway
 
-The [Railway setup](railway/README.md) describes the four-service template and
-prebuilt images. For a custom domain, also configure `ALLOWED_ORIGINS` and
-redeploy the `powerbin` service. DNS and Railway networking alone do not update
-the app's origin allowlist. Follow the
-[custom-domain steps](railway/README.md#custom-domains) to preserve the JWT issuer
-and verify browser JavaScript requests.
+The [Railway setup](railway/README.md) describes the three-service template and
+prebuilt images. The server accepts same-origin HTTPS requests on custom domains
+routed to the `powerbin` service. `ALLOWED_ORIGINS` is for additional cross-origin
+frontends. The [custom-domain steps](railway/README.md#custom-domains) cover DNS,
+issuer stability, verification, and the workaround for older images that return
+`403` for JavaScript files.
 
 ## Command-line recipients
 

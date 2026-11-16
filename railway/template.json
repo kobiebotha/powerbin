@@ -166,7 +166,7 @@
         },
         "ALLOWED_ORIGINS": {
           "isOptional": true,
-          "description": "Additional trusted HTTPS origins for custom domains, comma-separated with no spaces or trailing slashes; redeploy after changes",
+          "description": "Additional trusted cross-origin frontends, comma-separated HTTPS origins with no spaces or trailing slashes; older images also require custom domains here; redeploy after changes",
           "defaultValue": ""
         },
         "POWERSYNC_URL": {

@@ -236,10 +236,12 @@ these public URL entries; keep deployed secrets out of local app builds.
 
 ## Custom domains
 
-Adding a Railway domain and DNS records also requires updating PowerBin's allowed
-origins. Browser module requests include an `Origin` header; an unlisted origin
-gets `403` with `Origin not allowed`, even when the HTML page loads and a plain
-`curl` request succeeds.
+The server accepts browser requests whose HTTPS origin matches the hostname
+Railway routes to the `powerbin` service. A custom domain serving both the app
+and API does not need an `ALLOWED_ORIGINS` entry with this server code.
+`ALLOWED_ORIGINS` permits additional cross-origin frontends, such as an app hosted
+separately from its API. It accepts comma-separated full HTTPS origins with no
+spaces, paths, or trailing slashes; the `API_ORIGIN` origin is already allowed.
 
 1. In the `powerbin` service variables, pin `API_ORIGIN` to its current resolved
    HTTPS URL, such as `https://your-service.up.railway.app`. It is also the session
@@ -249,12 +251,10 @@ gets `403` with `Origin not allowed`, even when the HTML page loads and a plain
 2. Add the custom domain to the `powerbin` service with target port `8080`, then
    add the DNS records Railway shows at your DNS provider. Railway handles the
    public TLS certificate and forwards requests to the app's HTTP port.
-3. Set `ALLOWED_ORIGINS` on `powerbin` to the full custom origin, for example
-   `https://powerbin.example.com`. Preserve existing entries; separate multiple
-   origins with commas and use no spaces, paths, or trailing slashes. The
-   `API_ORIGIN` origin is already allowed automatically.
-4. Apply the variables and redeploy `powerbin`. No image rebuild is needed. Open
-   the HTTPS URL after Railway has provisioned its certificate.
+3. Apply any variable changes and redeploy `powerbin`. Open the HTTPS URL after
+   Railway has provisioned its certificate. Keep `TRUST_PROXY_HEADER=x-real-ip`
+   so the server recognizes Railway's HTTPS forwarding; the backend must be
+   reachable only through that trusted edge.
 
 Verify an actual JavaScript asset with the browser's origin header, using a
 filename from the deployed page:
@@ -265,13 +265,25 @@ curl -i -H 'Origin: https://powerbin.example.com' \
 ```
 
 Expect `200` and `Access-Control-Allow-Origin: https://powerbin.example.com`.
-`403` with `Origin not allowed` means the origin is missing or the updated
-variables have not reached the running deployment. A certificate name mismatch
-is a separate TLS problem; follow Railway's
+Images released before the automatic same-origin fix reject new custom origins
+until the process is reconfigured. An optional template variable and README
+update alone cannot change an already published container image. If JavaScript
+still returns `403` with `Origin not allowed`, add the custom origin explicitly
+and apply the variables to redeploy the service:
+
+```dotenv
+ALLOWED_ORIGINS=https://powerbin.example.com
+```
+
+Preserve any existing comma-separated entries. This workaround needs no image
+rebuild. To use the automatic behavior, publish the updated PowerBin image and
+redeploy from it; the template uses `ghcr.io/kobiebotha/powerbin:latest`.
+
+A certificate name mismatch is a separate TLS problem; follow Railway's
 [SSL troubleshooting guide](https://docs.railway.com/networking/troubleshooting/ssl).
 
-These template defaults apply to new installations. Existing deployments need
-the variable changes and redeploy described above.
+Template edits apply to new installations. Existing deployments keep their
+running image and configuration until updated and redeployed.
 
 ## Scheduled bucket cleanup
 
@@ -335,8 +347,11 @@ not reuse the development stack. Docker and Node.js 22+ are required. It verifie
 the current TSX entry and descriptor assets, PowerSync workers and SQLite WASM,
 HTTP MIME types, the shared database and restricted roles, the explicit
 publication excluding PowerSync storage tables, health checks, authenticated
-bootstrap, JWT/JWKS, and signing-key persistence after container replacement. The runtime
-image is also checked for accidentally retained development files or secrets.
+bootstrap, JWT/JWKS, and signing-key persistence after container replacement. It
+also sends browser module, API, and preflight requests through a new HTTPS
+hostname without an `ALLOWED_ORIGINS` entry and confirms unrelated origins remain
+blocked. The runtime image is also checked for accidentally retained development
+files or secrets.
 
 The [compaction check](compaction-smoke.mjs) uses one disposable Postgres database
 for source tables and PowerSync storage. It reproduces retained superseded

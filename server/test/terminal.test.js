@@ -57,7 +57,7 @@ test('terminal link view reads availability without revealing or burning', async
     assert.doesNotMatch(response.body, /<html|<script/);
     assert.equal(response.headers['content-type'], 'text/plain; charset=utf-8');
     assert.equal(response.headers['cache-control'], 'no-store');
-    assert.equal(response.headers.vary, 'Accept, User-Agent');
+    assert.equal(response.headers.vary, 'Origin, Accept, User-Agent');
     assert.equal(response.headers['referrer-policy'], 'no-referrer');
     assert.equal(reads.at(-1), id);
     assert.equal(item.burned_at, null);
@@ -78,7 +78,7 @@ test('terminal link view reads availability without revealing or burning', async
       const response = await get(server, `/?link=${id}`, { headers });
       assert.equal(response.status, 200);
       assert.match(response.body, /<title>PowerBin/);
-      assert.equal(response.headers.vary, 'Accept, User-Agent, Accept-Encoding');
+      assert.equal(response.headers.vary, 'Origin, Accept, User-Agent, Accept-Encoding');
     }
     const explicitText = await get(server, `/?link=${id}`, { headers: { accept: 'text/plain' } });
     assert.equal(explicitText.headers['content-type'], 'text/plain; charset=utf-8');
