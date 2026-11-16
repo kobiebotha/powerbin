@@ -1,3 +1,12 @@
+# Note from human author
+
+1. This project was built using GPT-Sol 6.1 Ultra
+4. No human code review has been performed yet
+2. This project was pentested using Fable 5.2 and Cloudflare's [Security Audit Skill](https://github.com/cloudflare/security-audit-skill), and all major findings have been addressed.
+3. I will probably look at issues since this is an app I'll be using myself regularly
+
+_Everything below this line was written by AI under human supervision_
+
 # PowerBin
 
 A self-hosted text relay built with Native Shell, PowerSync, and Postgres. Send
@@ -12,7 +21,17 @@ compiled natively or to WebAssembly. A generated, typed
 [bridge](app/src/bridge.rs) pushes display state into TSX signals and sends
 commands back to the Rust core.
 
-## Run locally
+## Self-host
+
+Run the complete stack with Docker Compose: the packaged browser app, API,
+PowerSync, and both databases. See [the Docker guide](docs/docker.md) for setup,
+persistent storage, updates, and hosting on your own server. No local application
+build toolchain is needed.
+
+The [Railway guide](railway/README.md) covers the four-service template and the
+GHCR images published after successful checks on `master`.
+
+## Develop from source
 
 Prerequisites: Node.js 22.12+, pnpm 12.18.0 installed with its standalone installer
 or Homebrew, Docker with Compose 2.20.3+, Rust stable (validated

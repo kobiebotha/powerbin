@@ -40,16 +40,14 @@ specific release or rollback.
 Image names use the workflow repository owner's lowercase name, so forks publish
 under their own account; update the template image references when using a fork.
 
-To activate this from `init`:
+Before using the template:
 
-1. Push the workflow and accompanying template changes to `init`, then merge into
-   `master`. A merge is not needed to author the workflow; its first publication
-   happens when it lands on `master`.
-2. Wait for the **Publish container images** workflow to finish. GitHub defaults new GHCR
+1. Wait for the [**Publish container images** workflow](https://github.com/kobiebotha/powerbin/actions/workflows/publish-images.yml)
+   on `master` to finish successfully. GitHub defaults new GHCR
    packages to private. Set all three packages to **Public** in each package's
    settings so Railway and template users can pull without credentials. See
    [GitHub's container registry documentation](https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry#pushing-container-images).
-3. Verify anonymous access, for example with an empty Docker config directory:
+2. Verify anonymous access, for example with an empty Docker config directory:
 
    ```sh
    docker_config=$(mktemp -d)
@@ -58,16 +56,16 @@ To activate this from `init`:
    docker --config "$docker_config" pull --platform linux/amd64 ghcr.io/kobiebotha/powerbin-powersync:latest
    ```
 
-4. Switch the Railway service sources and the remote template to the image
-   references in `template.json` once the images are available. Preserve existing
-   environment variables and volumes. Existing database/role names need the
-   migration described below before adopting the renamed template defaults.
+3. Test a fresh installation from the draft before publishing the template.
+   Existing installations need the database/role migration described below
+   before adopting the renamed template defaults. Updating the draft does not
+   migrate their environment variables or volumes.
 
 Publishing updates GHCR. This workflow does not redeploy Railway; image update
 policies or an explicit redeploy control when a running project adopts a new
 image. Railway accepts [public Docker image sources](https://docs.railway.com/services#deploying-a-public-docker-image).
 
-## Earlier template authoring
+## Template authoring
 
 An existing
 [PowerBin draft](https://railway.com/workspace/templates/a22b8e33-dd36-455d-9887-1e93d2168810/settings)
@@ -112,7 +110,7 @@ configuration and remote draft now use their own canonical IDs.
 
 ```sh
 node railway/template-api.mjs plan
-node railway/template-api.mjs apply --template a22b8e33-dd36-455d-9887-1e93d2168810
+node railway/template-api.mjs apply --template EMPTY_DRAFT_ID
 ```
 
 Applying requires an account or workspace API token in `RAILWAY_API_TOKEN`,
@@ -371,11 +369,15 @@ and `SMOKE_POWERSYNC_IMAGE`; by default these are the three release tags above.
 The compaction check uses `SMOKE_STORAGE_IMAGE` (default `postgres:18`) for its
 single disposable database.
 
-On 13 November 2026, the GHCR publishing setup passed actionlint, all 28 unit
-tests, Linux amd64 image builds from commit `9af9181`, and the default release
-container/API smoke check, including all 65 served assets and signing-key persistence. This check did
-not use `--native`. The GitHub publishing jobs await the workflow landing on
-`master`; no GHCR publication or Railway source switch was performed locally.
+On 13 November 2026, PowerBin built locally for Linux amd64 from merged `master`
+commit `7372576`, and the default release container/API smoke check passed,
+including all 65 served assets and signing-key persistence. This check did not use
+`--native`. The full [Docker Compose setup](../docs/docker.md) also passed a fresh,
+isolated stack check, and its Docker-only credential setup command was verified.
+Actionlint passed, and all 28 unit tests passed in the GitHub merge run. That run
+failed during image building before publishing; the same PowerBin Docker build
+passed locally. A successful GitHub publishing run and anonymous GHCR pulls are
+still required before deploying the template.
 
 On 11 November 2026, all three release images built successfully for
 Linux amd64, including a frozen pnpm 12.18.0 install and the mixed TSX/Rust/WASM
@@ -398,9 +400,9 @@ frontend. `node railway/smoke.mjs --native` passed against fresh databases:
 - The disposable containers, network, and database/key volumes were removed;
   the existing development stack was left untouched.
 
-That smoke run used PowerSync Service 1.25.0. The Dockerfile subsequently returned
-to `latest`; no rebuild or retest was performed for that tag change. No application
-retest was performed during API authoring, as requested.
+That earlier smoke run used PowerSync Service 1.25.0. The current Dockerfile uses
+`latest`; the later release and Compose checks are recorded above. No Railway
+application retest was performed during API authoring.
 
 The 17 backend/domain/web/signing-key tests and browser adapter type-check also
 passed. Browser/macOS pairing, saved snippets, and one-use guest reveal were
