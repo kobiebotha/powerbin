@@ -198,6 +198,9 @@ deliberate, narrowly scoped sharing exception.
 
 ## Explicit exclusions
 
+These exclusions apply to the tenancy release; deferred work below is not a
+release requirement.
+
 Recovery codes or key escrow; email/password login; cross-tenant direct sending;
 contacts, shared household vaults, or recipient inboxes; multiple remembered
 accounts; automatic migration of existing demo databases; encryption key rotation;
@@ -205,5 +208,29 @@ permanent tenant deletion or self-delete; an admin dashboard; per-tenant storage
 quotas and billing; OS deep-link integration; and multi-region or horizontal
 scaling work.
 
-This roadmap records the agreed tenancy work. It does not change the encryption
-protocol or include implementation and deployment work by itself.
+## Deferred protocol work
+
+### Full cryptographic revocation
+
+Added on: 13 November 2026. Deferred for the demo and tenancy release. Revisit
+before promising that device removal protects future data against a compromised
+backend collaborating with the removed device. See the
+[audit finding and current mitigation](docs/security-audit/REPORT.md#8-local-remediation--13-november-2026).
+
+- [ ] Rotate the tenant's shared encryption key on removal and distribute the new
+  key only to remaining verified devices, encrypted for each recipient.
+- [ ] Authenticate membership changes and persist membership versions so the
+  backend cannot restore an old membership state or use a removed device's old
+  group key to admit a fresh identity.
+- [ ] Define offline-device catch-up, concurrent membership changes, retry/restart
+  behavior, protocol upgrades, and access to historical saved snippets.
+- [ ] Test a removed device working with a malicious backend: replayed membership
+  states and forged admissions must fail, and old keys must not decrypt new saved
+  snippets after the remaining devices apply the removal.
+
+This cannot retract plaintext, ciphertext, or keys already copied by a device.
+The current persistent ID/key block remains a mitigation for known identities
+until this protocol work is implemented.
+
+This roadmap records the agreed tenancy work and deferred protocol work. It does
+not implement protocol changes or deploy them by itself.

@@ -1,7 +1,14 @@
 # Publishing a PowerBin Railway template
 
-Research checked 2026-11-11 against Railway and PowerSync primary sources, with
-the GHCR draft update verified on 2026-11-13. This
+**2026-11-16 update:** The local template and unpublished PowerBin draft now use
+three services and one shared `powerbin` Postgres database for application data and PowerSync storage, with
+separate roles and schemas. The publication lists only `devices` and `items`.
+The draft's configuration and hosting README were confirmed by final API
+read-back; no running deployment or marketplace publication was requested.
+See [the current setup](../railway/README.md); the four-service recommendation
+and remote read-backs below describe the earlier draft.
+
+Research checked 2026-11-11 against Railway and PowerSync primary sources. This
 note describes the authoring workflow and its current state. The four-service
 configuration has been applied to the original unpublished PowerBin draft and
 confirmed by final API read-back. No running Railway deployment or marketplace

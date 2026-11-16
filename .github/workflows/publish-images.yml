@@ -68,7 +68,7 @@ jobs:
           cache-from: type=gha,scope=powerbin
           cache-to: type=gha,scope=powerbin,mode=max
 
-      - name: Build source Postgres
+      - name: Build shared Postgres
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
@@ -98,7 +98,7 @@ jobs:
           cache-from: type=gha,scope=powerbin-powersync
           cache-to: type=gha,scope=powerbin-powersync,mode=max
 
-      - name: Pull storage Postgres
+      - name: Pull Postgres for compaction smoke
         run: docker pull --platform linux/amd64 postgres:18
 
       - name: Smoke test the release stack
