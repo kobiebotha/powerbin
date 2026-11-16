@@ -53,6 +53,7 @@ powersync/docker/modules/database-postgres/init-scripts/**
 !railway/
 railway/**
 !railway/*.Dockerfile
+!railway/init-storage.sh
 !railway/service.yaml
 !railway/powersync-supervisor.mjs
 **/.tools

@@ -55,10 +55,13 @@ async function database() {
     '--label', `powerbin.compaction-smoke=${prefix}`, '--tmpfs', '/var/lib/postgresql',
     '--env', 'POSTGRES_PASSWORD', '--env', 'POSTGRES_DB=smoke', postgres, 'postgres', '-c', 'wal_level=logical'],
   { env: { POSTGRES_PASSWORD: password } });
-  await wait(postgresName, async () => (await docker(['exec', postgresName, 'pg_isready', '-U', 'postgres', '-d', 'smoke'])).includes('accepting connections'));
+  // The entrypoint's temporary initialization server only listens on a socket.
+  // Query over TCP so both the database and the final server must be ready.
+  await wait(postgresName, async () => await sql('SELECT 1') === '1');
 }
 
-const sql = statement => docker(['exec', '-i', postgresName, 'psql', '-U', 'postgres', '-d', 'smoke', '-v', 'ON_ERROR_STOP=1', '-At'], { input: statement });
+const sql = statement => docker(['exec', '-i', postgresName, 'sh', '-c',
+  'PGPASSWORD="$POSTGRES_PASSWORD" psql --host=127.0.0.1 --username=postgres --dbname=smoke --set=ON_ERROR_STOP=1 --tuples-only --no-align'], { input: statement });
 async function startSync(supervised) {
   containers.add(sync);
   await docker(['run', '--detach', '--pull=never', '--name', sync, '--network', prefix,

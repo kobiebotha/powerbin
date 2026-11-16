@@ -7,13 +7,15 @@ reducing overhead for small self-hosted installations with little resource
 contention. Application queries, replication, and sync storage share its resources.
 Only `powerbin` and `powersync` need public HTTPS domains. The local template uses
 prebuilt GHCR images so Railway pulls the runtime images without compiling Rust,
-WASM, or the frontend. Existing Railway projects and the remote template are not
-changed by edits to this checkout.
+WASM, or the frontend. Existing Railway projects are not changed by edits to this
+checkout. On 2026-11-16, the unpublished PowerBin draft was updated to this
+three-service configuration and confirmed by final API read-back, including its
+hosting README.
 
-Publish the updated Postgres image and apply `template.json` to the draft before
-testing a fresh Railway deployment; the storage role is created by the new image's
-initialization script. The local Docker Compose development stack still uses
-separate source and storage databases.
+Publish the updated Postgres image before testing a fresh Railway deployment;
+the draft already uses the shared database, and the storage role is created by
+the new image's initialization script. The local Docker Compose development
+stack still uses separate source and storage databases.
 
 ## Publish images with GitHub Actions
 
@@ -69,13 +71,12 @@ image. Railway accepts [public Docker image sources](https://docs.railway.com/se
 
 An existing
 [PowerBin draft](https://railway.com/workspace/templates/a22b8e33-dd36-455d-9887-1e93d2168810/settings)
-has the authored four-service configuration applied and confirmed by final API
-read-back during initial authoring. A separate
+initially had a four-service configuration confirmed by API read-back. It now
+matches the three-service configuration in this checkout. A separate
 [configuration-only project](https://railway.com/project/8f5b7f87-5f5d-4d1e-88e0-6038a724b7ea)
 was created with four configured services and no repository deployment triggers.
-The PowerBin service, database, role, and variable renames and the shared-database
-layout in this checkout have not been applied to either remote configuration;
-the API read-back above records the earlier configuration.
+The configuration-only project retains its earlier layout; it has not been
+migrated. Updating the draft did not deploy or migrate a running installation.
 
 The Dockerfiles and settings below define the stack.
 [template.json](template.json) is the authored `serializedConfig`, derived from
@@ -83,9 +84,9 @@ the actual API response for the PowerSync starter. It is configuration data for
 the template API, rather than a file Railway automatically imports from Git.
 Those earlier GitHub-backed service sources used
 [`kobiebotha/powersync-native-shell-demo/tree/init`](https://github.com/kobiebotha/powersync-native-shell-demo/tree/init)
-with the repository root as their root directory. The local specification now
-uses GHCR image sources and three services sharing one Postgres database; it has
-not been applied to those remote configurations.
+with the repository root as their root directory. The local specification uses
+GHCR image sources and three services sharing one Postgres database. It is now
+applied to the unpublished PowerBin draft.
 
 ## Direct API draft authoring
 
@@ -100,10 +101,10 @@ is undocumented and may change; no Railway UI or browser was used.
 It stages the configuration, verifies the staged `draftView`, applies the change
 set, and compares the final `serializedConfig` with `template.json`, including
 variable defaults, source branches, networking, and volumes. It never publishes
-or requests a running deployment. The original PowerBin draft's change set is
-`APPLIED`; final read-back confirmed all four services, `/tree/init` sources,
-literal and generated defaults, service references, healthchecks, public-domain
-settings, and volumes.
+or requests a running deployment. The current PowerBin draft's change set is
+`APPLIED`; final read-back confirmed all three services, GHCR sources, literal and
+generated defaults, service references, healthchecks, public-domain settings,
+volumes, and removal of the separate storage service.
 
 Use unique service and volume IDs for each independently derived template.
 Copied starter IDs caused collisions in this authoring flow; PowerBin's local
@@ -120,6 +121,13 @@ insufficient for workspace template authoring. Tokens are never printed.
 The script edits only the specified unpublished draft and keeps progress and the
 read-back under ignored `.tools/`. If a mutation does not return a saved result,
 it stops instead of blindly repeating it.
+
+For later revisions, the remote configuration must match the helper's saved
+verified export. To incorporate independently inspected changes, pass
+`--expected-config PATH` with a fresh snapshot of the template's `serializedConfig`.
+The helper compares that entire snapshot before making changes and refuses
+unfinished mutations or existing staged edits. Updates explicitly remove deleted
+services and verify the complete resulting configuration before and after apply.
 
 The superseded generated draft `7eec8e95-dc52-49b8-a8ed-26d542bb012a` (code `t_GPKU`)
 is unpublished and missing literal defaults and the intended branch; do not use
@@ -340,6 +348,15 @@ then checks that automatic compaction removes the old payload while preserving
 live ciphertext. It never reads `.env` or modifies a running installation. The
 [scheduler tests](powersync-supervisor.test.mjs) exercise hourly scheduling,
 readiness, retries, non-overlap, and signal handling without Docker.
+
+On 2026-11-16, the shared-database release smoke and compaction checks passed using
+locally rebuilt Postgres and PowerSync images and the existing `powerbin:readiness`
+application image. The release check verified storage-role isolation and confirmed
+that only `public.devices` and `public.items` remain published after PowerSync
+creates its storage tables. No native-client sync test or Railway deployment was
+run for this change. The [template helper tests](template-api.test.mjs) use an
+isolated mocked API to check updates, database removal, interrupted runs, and
+refusal to overwrite unexpected changes.
 
 With the repository's native Rust prerequisites installed, exercise two real SDK
 clients against the same disposable stack:
