@@ -1,0 +1,11 @@
+Generated with the built-in image_gen tool, with transparent_background=true.
+
+Use case: logo-brand.
+Asset type: one final square 1:1 marketplace icon for PowerBin, a private text relay. Create one isolated icon, not a presentation, grid or mockup.
+Primary request: faithfully carry the existing website's green phosphor terminal identity into a polished, minimal marketplace app icon. The existing brand mark is exactly ">_" inside a nearly square deep-green terminal tile.
+Scene/backdrop: genuinely transparent canvas outside the icon. No opaque full-canvas backdrop and no checkerboard baked into the image.
+Subject: a single front-facing, flat, nearly square terminal tile, sharp precise geometry with only very slightly softened corners, taking up about 88% of the canvas and centered. Deep near-black green interior #050a07, subtle inset outline #23482e, and a large bold mint-green greater-than chevron followed by a low horizontal cursor underscore, exactly ">_", #9bff9a. The prompt should occupy roughly two thirds of the tile width, generously spaced, optically centered, with thick strokes readable at 32px. This is the whole symbol.
+Style/medium: beautifully simple graphic mark with clean vector-like edges. The faintest restrained green phosphor halo immediately around the mint strokes, and extremely subtle horizontal scanline texture only inside the tile. Keep the strokes crisp, the silhouette strong and balanced. Almost-flat, straight-on, no perspective.
+Color palette: exact site colors: background #050a07, soft green #142a1b, border #23482e, mint accent #9bff9a.
+Text (verbatim): ">_" only. No PowerBin wordmark, letters, numbers or tagline.
+Constraints: one clear icon, square output, actual alpha transparency around the tile, no exterior shadows, no gradients outside the tile, no extra symbols, no locks, shields, lightning bolts, devices, decorative corners, window dots or additional windows, no watermark. Professional developer-tool identity.

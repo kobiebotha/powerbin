@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Fresh disposable databases only. This never reads .env or a running project.
+// Fresh disposable shared database only. This never reads .env or a running project.
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
@@ -11,7 +11,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 const prefix = `powerbin-compact-${process.pid}-${randomBytes(4).toString('hex')}`;
 const image = process.env.SMOKE_POWERSYNC_IMAGE || 'powerbin-powersync:release';
 const postgres = process.env.SMOKE_STORAGE_IMAGE || 'postgres:18';
-const source = `${prefix}-source`, storage = `${prefix}-storage`, sync = `${prefix}-sync`;
+const postgresName = `${prefix}-postgres`, sync = `${prefix}-sync`;
 const password = randomBytes(32).toString('hex');
 const directory = await mkdtemp(join(tmpdir(), 'powerbin-compact-'));
 const containers = new Set();
@@ -49,16 +49,16 @@ async function wait(label, check) {
   throw new Error(`Timed out waiting for ${label}`);
 }
 
-async function database(name, extra = []) {
-  containers.add(name);
-  await docker(['run', '--detach', '--pull=never', '--name', name, '--network', prefix,
+async function database() {
+  containers.add(postgresName);
+  await docker(['run', '--detach', '--pull=never', '--name', postgresName, '--network', prefix,
     '--label', `powerbin.compaction-smoke=${prefix}`, '--tmpfs', '/var/lib/postgresql',
-    '--env', 'POSTGRES_PASSWORD', '--env', 'POSTGRES_DB=smoke', postgres, ...extra],
+    '--env', 'POSTGRES_PASSWORD', '--env', 'POSTGRES_DB=smoke', postgres, 'postgres', '-c', 'wal_level=logical'],
   { env: { POSTGRES_PASSWORD: password } });
-  await wait(name, async () => (await docker(['exec', name, 'pg_isready', '-U', 'postgres', '-d', 'smoke'])).includes('accepting connections'));
+  await wait(postgresName, async () => (await docker(['exec', postgresName, 'pg_isready', '-U', 'postgres', '-d', 'smoke'])).includes('accepting connections'));
 }
 
-const sql = (container, statement) => docker(['exec', '-i', container, 'psql', '-U', 'postgres', '-d', 'smoke', '-v', 'ON_ERROR_STOP=1', '-At'], { input: statement });
+const sql = statement => docker(['exec', '-i', postgresName, 'psql', '-U', 'postgres', '-d', 'smoke', '-v', 'ON_ERROR_STOP=1', '-At'], { input: statement });
 async function startSync(supervised) {
   containers.add(sync);
   await docker(['run', '--detach', '--pull=never', '--name', sync, '--network', prefix,
@@ -78,14 +78,13 @@ try {
   await docker(['image', 'inspect', postgres]);
   network = true;
   await docker(['network', 'create', '--label', `powerbin.compaction-smoke=${prefix}`, prefix]);
-  await database(source, ['postgres', '-c', 'wal_level=logical']);
-  await database(storage);
-  await sql(source, 'CREATE TABLE items (id UUID PRIMARY KEY, payload TEXT); CREATE PUBLICATION powersync FOR TABLE items;');
+  await database();
+  await sql('CREATE TABLE items (id UUID PRIMARY KEY, payload TEXT); CREATE PUBLICATION powersync FOR TABLE items;');
   const publicKey = generateKeyPairSync('ed25519').publicKey.export({ format: 'jwk' });
   await writeFile(join(directory, 'service.yaml'), JSON.stringify({
     name: 'powerbin-compaction-smoke', _type: 'self-hosted', port: 8080,
-    replication: { connections: [{ type: 'postgresql', uri: `postgresql://postgres:${password}@${source}:5432/smoke`, sslmode: 'disable' }] },
-    storage: { type: 'postgresql', uri: `postgresql://postgres:${password}@${storage}:5432/smoke`, sslmode: 'disable' },
+    replication: { connections: [{ type: 'postgresql', uri: `postgresql://postgres:${password}@${postgresName}:5432/smoke`, sslmode: 'disable' }] },
+    storage: { type: 'postgresql', uri: `postgresql://postgres:${password}@${postgresName}:5432/smoke`, sslmode: 'disable' },
     sync_config: { path: 'sync-config.yaml' },
     client_auth: { audience: ['powersync'], jwks: { keys: [{ ...publicKey, alg: 'EdDSA', kid: 'smoke' }] } }
   }), { mode: 0o644 });
@@ -93,18 +92,20 @@ try {
   await startSync(false);
   let table;
   await wait('bucket storage schema', async () => {
-    table = await sql(storage, "SELECT quote_ident(schemaname) || '.' || quote_ident(tablename) FROM pg_tables WHERE tablename = 'bucket_data'");
+    table = await sql("SELECT quote_ident(schemaname) || '.' || quote_ident(tablename) FROM pg_tables WHERE tablename = 'bucket_data'");
     return /^[a-z_]+\.[a-z_]+$/.test(table);
   });
+  assert.equal(await sql("SELECT puballtables || ':' || (SELECT string_agg(schemaname || '.' || tablename, ',' ORDER BY schemaname, tablename) FROM pg_publication_tables WHERE pubname = 'powersync') FROM pg_publication WHERE pubname = 'powersync'"),
+    'false:public.items', 'Publication excludes PowerSync storage tables in the shared database');
   const id = randomUUID(), liveId = randomUUID();
   const burnedMarker = `burned-ciphertext-${randomUUID()}`, liveMarker = `live-ciphertext-${randomUUID()}`;
-  const count = marker => sql(storage, `SELECT count(*) FROM ${table} WHERE data::text LIKE '%${marker}%'`);
-  await sql(source, `INSERT INTO items VALUES ('${id}', '${burnedMarker}'), ('${liveId}', '${liveMarker}');`);
+  const count = marker => sql(`SELECT count(*) FROM ${table} WHERE data::text LIKE '%${marker}%'`);
+  await sql(`INSERT INTO items VALUES ('${id}', '${burnedMarker}'), ('${liveId}', '${liveMarker}');`);
   await wait('ciphertext replication', async () => Number(await count(burnedMarker)) > 0 && Number(await count(liveMarker)) > 0);
-  await sql(source, `UPDATE items SET payload = NULL WHERE id = '${id}';`);
-  await wait('burn replication', async () => Number(await sql(storage, `SELECT count(*) FROM ${table} WHERE row_id = '${id}'`)) >= 2);
+  await sql(`UPDATE items SET payload = NULL WHERE id = '${id}';`);
+  await wait('burn replication', async () => Number(await sql(`SELECT count(*) FROM ${table} WHERE row_id = '${id}'`)) >= 2);
   assert.ok(Number(await count(burnedMarker)) > 0, 'unscheduled bucket history retains the old ciphertext');
-  console.log('PASS: reproduced retained burned ciphertext in isolated Postgres bucket history');
+  console.log('PASS: reproduced retained burned ciphertext with source and bucket storage sharing one database');
 
   await docker(['stop', '--time', '15', sync]);
   await docker(['rm', sync]);

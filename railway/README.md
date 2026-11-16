@@ -1,11 +1,19 @@
 # Railway images and template
 
-This stack has four services: `postgres` (application data), `bucket` (PowerSync
-storage), `powersync`, and `powerbin` (API plus the packaged Native Shell website).
+This stack has three services: `postgres` (application data and PowerSync
+storage in one database), `powersync`, and `powerbin` (API plus the packaged Native
+Shell website). Sharing Postgres avoids a second database service and volume,
+reducing overhead for small self-hosted installations with little resource
+contention. Application queries, replication, and sync storage share its resources.
 Only `powerbin` and `powersync` need public HTTPS domains. The local template uses
 prebuilt GHCR images so Railway pulls the runtime images without compiling Rust,
 WASM, or the frontend. Existing Railway projects and the remote template are not
 changed by edits to this checkout.
+
+Publish the updated Postgres image and apply `template.json` to the draft before
+testing a fresh Railway deployment; the storage role is created by the new image's
+initialization script. The local Docker Compose development stack still uses
+separate source and storage databases.
 
 ## Publish images with GitHub Actions
 
@@ -26,7 +34,7 @@ Railway credentials are needed. Actions are pinned to commit SHAs.
 
 Each image gets `latest` and `sha-<full Git commit SHA>` tags. Use `latest` for a
 moving release channel, or pin all three services to the same commit tag for a
-specific release or rollback. The bucket continues to use `postgres:18` directly.
+specific release or rollback.
 Image names use the workflow repository owner's lowercase name, so forks publish
 under their own account; update the template image references when using a fork.
 
@@ -65,9 +73,9 @@ has the authored four-service configuration applied and confirmed by final API
 read-back during initial authoring. A separate
 [configuration-only project](https://railway.com/project/8f5b7f87-5f5d-4d1e-88e0-6038a724b7ea)
 was created with four configured services and no repository deployment triggers.
-The PowerBin service, database, role, and variable renames in this checkout have
-not been applied to either remote configuration; the API read-back above records
-the earlier configuration.
+The PowerBin service, database, role, and variable renames and the shared-database
+layout in this checkout have not been applied to either remote configuration;
+the API read-back above records the earlier configuration.
 
 The Dockerfiles and settings below define the stack.
 [template.json](template.json) is the authored `serializedConfig`, derived from
@@ -76,7 +84,8 @@ the template API, rather than a file Railway automatically imports from Git.
 Those earlier GitHub-backed service sources used
 [`kobiebotha/powersync-native-shell-demo/tree/init`](https://github.com/kobiebotha/powersync-native-shell-demo/tree/init)
 with the repository root as their root directory. The local specification now
-uses GHCR image sources; it has not been applied to those remote configurations.
+uses GHCR image sources and three services sharing one Postgres database; it has
+not been applied to those remote configurations.
 
 ## Direct API draft authoring
 
@@ -121,7 +130,6 @@ was requested. The original PowerSync starter is unchanged. See the
 | Service | Source image | Volume | Public port | Health check |
 | --- | --- | --- | --- | --- |
 | `postgres` | `ghcr.io/kobiebotha/powerbin-postgres:latest` | `/var/lib/postgresql` | None | None (no HTTP endpoint) |
-| `bucket` | Docker image `postgres:18` | `/var/lib/postgresql` | None | None (no HTTP endpoint) |
 | `powersync` | `ghcr.io/kobiebotha/powerbin-powersync:latest` | None | 8080 | `/probes/startup` |
 | `powerbin` | `ghcr.io/kobiebotha/powerbin:latest` | `/data` | 8080 | `/health` |
 
@@ -148,14 +156,7 @@ POSTGRES_USER=postgres
 POSTGRES_PASSWORD=${{secret(48)}}
 POWERBIN_APP_PASSWORD=${{secret(48)}}
 POWERBIN_REPLICATION_PASSWORD=${{secret(48)}}
-```
-
-`bucket`:
-
-```dotenv
-POSTGRES_DB=powersync
-POSTGRES_USER=powersync
-POSTGRES_PASSWORD=${{secret(48)}}
+POWERBIN_STORAGE_PASSWORD=${{secret(48)}}
 ```
 
 `powersync`:
@@ -163,7 +164,7 @@ POSTGRES_PASSWORD=${{secret(48)}}
 ```dotenv
 PORT=8080
 PS_DATA_SOURCE_URI=postgresql://powerbin_sync:${{postgres.POWERBIN_REPLICATION_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/powerbin
-PS_STORAGE_SOURCE_URI=postgresql://powersync:${{bucket.POSTGRES_PASSWORD}}@${{bucket.RAILWAY_PRIVATE_DOMAIN}}:5432/powersync
+PS_STORAGE_SOURCE_URI=postgresql://powerbin_storage:${{postgres.POWERBIN_STORAGE_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/powerbin
 PS_JWKS_URI=http://${{powerbin.RAILWAY_PRIVATE_DOMAIN}}:8080/api/keys
 PS_ADMIN_TOKEN=${{secret(48)}}
 ```
@@ -176,6 +177,7 @@ HOST=::
 TRUST_PROXY_HEADER=x-real-ip
 DATABASE_URL=postgresql://powerbin_app:${{postgres.POWERBIN_APP_PASSWORD}}@${{postgres.RAILWAY_PRIVATE_DOMAIN}}:5432/powerbin
 API_ORIGIN=https://${{RAILWAY_PUBLIC_DOMAIN}}
+ALLOWED_ORIGINS=
 POWERSYNC_URL=https://${{powersync.RAILWAY_PUBLIC_DOMAIN}}
 BOOTSTRAP_TOKEN=${{secret(48)}}
 JWT_PRIVATE_JWK_FILE=/data/signing-key.json
@@ -193,12 +195,22 @@ their own per-client budget of 30 requests per minute. Existing installations
 must set the variable when adopting the updated image; this source change does
 not update running projects.
 
-The source database initializes the schema, `powerbin_app` restricted write role,
-`powerbin_sync` replication/read role, and `powersync` publication only on a fresh
-volume. The storage database is separate. Never expose either database publicly.
-Existing initialized volumes and environment variables are not renamed
-automatically. An existing installation needs a coordinated database/role and
-environment migration before adopting these defaults.
+Postgres initializes the application schema, `powerbin_app` restricted write role,
+`powerbin_sync` replication/read role, and `powerbin_storage` storage role only on
+a fresh volume. PowerSync's source and storage connections use the same `powerbin`
+database with their respective roles. The storage role owns the `powersync`
+schema and has database connection permission, without superuser privileges,
+database-wide schema creation permission, or access to the application tables.
+The `powersync` publication explicitly lists only `devices` and `items`; never
+create it with `FOR ALL TABLES`, which would also publish PowerSync's own storage
+tables. Keep Postgres on the private network.
+
+Existing initialized volumes and environment variables are not changed
+automatically. An existing four-service installation needs a coordinated storage,
+role, and environment migration before adopting these defaults. Changing the
+storage URI does not move the old bucket state: preserve the existing `bucket`
+service and volume until the migration and client recovery have been verified.
+Fresh deployments use the shared layout directly.
 
 Railway has no template function for a paired Ed25519 JWK. PowerBin generates the
 key once on the explicit `/data` path and reuses it across deployments. Existing
@@ -215,6 +227,45 @@ URL in the local `.env` entries `API_ORIGIN` and `WEB_ORIGIN`, then rebuild.
 entering an API URL in the setup screen does not set that build-time value.
 The build script reads `.env`, rather than exported shell variables. Change only
 these public URL entries; keep deployed secrets out of local app builds.
+
+## Custom domains
+
+Adding a Railway domain and DNS records also requires updating PowerBin's allowed
+origins. Browser module requests include an `Origin` header; an unlisted origin
+gets `403` with `Origin not allowed`, even when the HTML page loads and a plain
+`curl` request succeeds.
+
+1. In the `powerbin` service variables, pin `API_ORIGIN` to its current resolved
+   HTTPS URL, such as `https://your-service.up.railway.app`. It is also the session
+   JWT issuer. The template starts with a `RAILWAY_PUBLIC_DOMAIN` reference;
+   pinning the existing value keeps that identity stable when Railway refreshes
+   domain variables during a redeploy.
+2. Add the custom domain to the `powerbin` service with target port `8080`, then
+   add the DNS records Railway shows at your DNS provider. Railway handles the
+   public TLS certificate and forwards requests to the app's HTTP port.
+3. Set `ALLOWED_ORIGINS` on `powerbin` to the full custom origin, for example
+   `https://powerbin.example.com`. Preserve existing entries; separate multiple
+   origins with commas and use no spaces, paths, or trailing slashes. The
+   `API_ORIGIN` origin is already allowed automatically.
+4. Apply the variables and redeploy `powerbin`. No image rebuild is needed. Open
+   the HTTPS URL after Railway has provisioned its certificate.
+
+Verify an actual JavaScript asset with the browser's origin header, using a
+filename from the deployed page:
+
+```sh
+curl -i -H 'Origin: https://powerbin.example.com' \
+  'https://powerbin.example.com/<javascript-filename-from-page>.js'
+```
+
+Expect `200` and `Access-Control-Allow-Origin: https://powerbin.example.com`.
+`403` with `Origin not allowed` means the origin is missing or the updated
+variables have not reached the running deployment. A certificate name mismatch
+is a separate TLS problem; follow Railway's
+[SSL troubleshooting guide](https://docs.railway.com/networking/troubleshooting/ssl).
+
+These template defaults apply to new installations. Existing deployments need
+the variable changes and redeploy described above.
 
 ## Scheduled bucket cleanup
 
@@ -276,13 +327,15 @@ fresh database volumes, signing-key volume, and random loopback ports. It genera
 temporary credentials and removes its resources on completion or failure. It does
 not reuse the development stack. Docker and Node.js 22+ are required. It verifies
 the current TSX entry and descriptor assets, PowerSync workers and SQLite WASM,
-HTTP MIME types, schema/publication/roles, health checks, authenticated bootstrap,
-JWT/JWKS, and signing-key persistence after container replacement. The runtime
+HTTP MIME types, the shared database and restricted roles, the explicit
+publication excluding PowerSync storage tables, health checks, authenticated
+bootstrap, JWT/JWKS, and signing-key persistence after container replacement. The runtime
 image is also checked for accidentally retained development files or secrets.
 
-The [compaction check](compaction-smoke.mjs) uses separate disposable source and
-storage databases. It reproduces retained superseded ciphertext without the
-schedule, restarts only its own test service with the image's default supervisor,
+The [compaction check](compaction-smoke.mjs) uses one disposable Postgres database
+for source tables and PowerSync storage. It reproduces retained superseded
+ciphertext without the schedule, restarts only its own test service with the
+image's default supervisor,
 then checks that automatic compaction removes the old payload while preserving
 live ciphertext. It never reads `.env` or modifies a running installation. The
 [scheduler tests](powersync-supervisor.test.mjs) exercise hourly scheduling,
@@ -297,8 +350,9 @@ node railway/smoke.mjs --native
 
 The native fixture uses the supplied disposable database URL and skips the local
 `.env`. Images can be overridden with `SMOKE_POWERBIN_IMAGE`, `SMOKE_POSTGRES_IMAGE`,
-`SMOKE_POWERSYNC_IMAGE`, and `SMOKE_STORAGE_IMAGE`; by default these are the three
-release tags above and `postgres:18`.
+and `SMOKE_POWERSYNC_IMAGE`; by default these are the three release tags above.
+The compaction check uses `SMOKE_STORAGE_IMAGE` (default `postgres:18`) for its
+single disposable database.
 
 On 13 November 2026, the GHCR publishing setup passed actionlint, all 28 unit
 tests, Linux amd64 image builds from commit `9af9181`, and the default release

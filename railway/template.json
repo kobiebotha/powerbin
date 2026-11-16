@@ -212,8 +212,13 @@
         },
         "API_ORIGIN": {
           "isOptional": false,
-          "description": "Public PowerBin origin used as the session JWT issuer",
+          "description": "Public PowerBin origin and session JWT issuer; pin to the current literal HTTPS URL before adding custom domains",
           "defaultValue": "https://${{RAILWAY_PUBLIC_DOMAIN}}"
+        },
+        "ALLOWED_ORIGINS": {
+          "isOptional": true,
+          "description": "Additional trusted HTTPS origins for custom domains, comma-separated with no spaces or trailing slashes; redeploy after changes",
+          "defaultValue": ""
         },
         "POWERSYNC_URL": {
           "isOptional": false,

@@ -14,13 +14,12 @@ if (process.argv.slice(2).some(arg => arg !== '--native')) {
   process.exit(2);
 }
 const prefix = `powerbin-smoke-${process.pid}-${randomBytes(4).toString('hex')}`;
-const names = Object.fromEntries(['postgres', 'bucket', 'powersync', 'powerbin'].map(name => [name, `${prefix}-${name}`]));
-const volumes = ['postgres', 'bucket', 'keys'].map(name => `${prefix}-${name}`);
+const names = Object.fromEntries(['postgres', 'powersync', 'powerbin'].map(name => [name, `${prefix}-${name}`]));
+const volumes = ['postgres', 'keys'].map(name => `${prefix}-${name}`);
 const images = {
   powerbin: process.env.SMOKE_POWERBIN_IMAGE || 'powerbin:release',
   postgres: process.env.SMOKE_POSTGRES_IMAGE || 'powerbin-postgres:release',
-  powersync: process.env.SMOKE_POWERSYNC_IMAGE || 'powerbin-powersync:release',
-  bucket: process.env.SMOKE_STORAGE_IMAGE || 'postgres:18'
+  powersync: process.env.SMOKE_POWERSYNC_IMAGE || 'powerbin-powersync:release'
 };
 const secrets = Object.fromEntries(['admin', 'app', 'replication', 'storage', 'bootstrap', 'powersync'].map(name => [name, randomBytes(32).toString('hex')]));
 const created = { containers: new Set(), volumes: [], network: false };
@@ -142,27 +141,36 @@ try {
     await docker(['volume', 'create', '--label', `powerbin.smoke=${prefix}`, volume]);
   }
   await run('postgres', { POSTGRES_DB: 'powerbin', POSTGRES_USER: 'postgres', POSTGRES_PASSWORD: secrets.admin,
-    POWERBIN_APP_PASSWORD: secrets.app, POWERBIN_REPLICATION_PASSWORD: secrets.replication },
+    POWERBIN_APP_PASSWORD: secrets.app, POWERBIN_REPLICATION_PASSWORD: secrets.replication, POWERBIN_STORAGE_PASSWORD: secrets.storage },
   ['--publish', `127.0.0.1:${postgresPort}:5432`, '--mount', `type=volume,source=${volumes[0]},target=/var/lib/postgresql`]);
-  await run('bucket', { POSTGRES_DB: 'powersync', POSTGRES_USER: 'powersync', POSTGRES_PASSWORD: secrets.storage },
-    ['--mount', `type=volume,source=${volumes[1]},target=/var/lib/postgresql`]);
   await ready('source Postgres initialization', async () => {
     const result = await docker(['exec', names.postgres, 'psql', '-U', 'postgres', '-d', 'powerbin', '-Atc',
-      "SELECT current_setting('wal_level') || ':' || (SELECT count(*) FROM pg_roles WHERE rolname IN ('powerbin_app', 'powerbin_sync')) || ':' || (SELECT string_agg(tablename, ',' ORDER BY tablename) FROM pg_publication_tables WHERE pubname='powersync')"]);
-    return result === 'logical:2:devices,items';
+      "SELECT current_setting('wal_level') || ':' || (SELECT count(*) FROM pg_roles WHERE rolname IN ('powerbin_app', 'powerbin_sync', 'powerbin_storage')) || ':' || (SELECT string_agg(tablename, ',' ORDER BY tablename) FROM pg_publication_tables WHERE pubname='powersync')"]);
+    return result === 'logical:3:devices,items';
   });
-  await ready('storage Postgres', async () => (await docker(['exec', names.bucket, 'pg_isready', '-U', 'powersync', '-d', 'powersync'])).includes('accepting connections'));
-  console.log('PASS: fresh source schema, restricted roles, logical replication, publication, and separate storage initialized');
+  console.log('PASS: fresh shared database, restricted application/replication/storage roles, and explicit publication initialized');
   await run('powersync', { PORT: '8080', PS_DATA_SOURCE_URI: `postgresql://powerbin_sync:${secrets.replication}@postgres:5432/powerbin`,
-    PS_STORAGE_SOURCE_URI: `postgresql://powersync:${secrets.storage}@bucket:5432/powersync`, PS_JWKS_URI: 'http://powerbin:8080/api/keys', PS_ADMIN_TOKEN: secrets.powersync },
+    PS_STORAGE_SOURCE_URI: `postgresql://powerbin_storage:${secrets.storage}@postgres:5432/powerbin`, PS_JWKS_URI: 'http://powerbin:8080/api/keys', PS_ADMIN_TOKEN: secrets.powersync },
   ['--publish', `127.0.0.1:${powersyncPort}:8080`]);
   const powerbinEnv = { PORT: '8080', HOST: '::', DATABASE_URL: `postgresql://powerbin_app:${secrets.app}@postgres:5432/powerbin`,
     API_ORIGIN: apiOrigin, POWERSYNC_URL: syncOrigin, BOOTSTRAP_TOKEN: secrets.bootstrap, JWT_PRIVATE_JWK_FILE: '/data/signing-key.json' };
-  const powerbinArgs = ['--publish', `127.0.0.1:${powerbinPort}:8080`, '--mount', `type=volume,source=${volumes[2]},target=/data`];
+  const powerbinArgs = ['--publish', `127.0.0.1:${powerbinPort}:8080`, '--mount', `type=volume,source=${volumes[1]},target=/data`];
   await run('powerbin', powerbinEnv, powerbinArgs);
   await ready('PowerBin health', async () => (await request(apiOrigin, '/health')).status === 200);
   await ready('PowerSync startup', async () => (await fetch(`${syncOrigin}/probes/startup`, { signal: AbortSignal.timeout(3000) })).ok);
   console.log('PASS: PowerBin and PowerSync healthy without fixed host ports or existing development credentials');
+  await ready('PowerSync storage in shared database', async () => {
+    const result = await docker(['exec', names.postgres, 'psql', '-U', 'postgres', '-d', 'powerbin', '-Atc',
+      "SELECT tableowner || ':' || has_table_privilege('powerbin_app', format('%I.%I', schemaname, tablename), 'SELECT') || ':' || has_table_privilege('powerbin_sync', format('%I.%I', schemaname, tablename), 'SELECT') || ':' || has_table_privilege('powerbin_storage', format('%I.%I', schemaname, tablename), 'SELECT') FROM pg_tables WHERE tablename = 'bucket_data'"]);
+    return result === 'powerbin_storage:false:false:true';
+  });
+  const publication = await docker(['exec', names.postgres, 'psql', '-U', 'postgres', '-d', 'powerbin', '-Atc',
+    "SELECT puballtables || ':' || (SELECT string_agg(schemaname || '.' || tablename, ',' ORDER BY schemaname, tablename) FROM pg_publication_tables WHERE pubname = 'powersync') FROM pg_publication WHERE pubname = 'powersync'"]);
+  assert.equal(publication, 'false:public.devices,public.items', 'Publication excludes PowerSync storage tables');
+  const storageAccess = await docker(['exec', names.postgres, 'psql', '-U', 'postgres', '-d', 'powerbin', '-Atc',
+    "SELECT has_table_privilege('powerbin_storage', 'public.devices', 'SELECT') OR has_table_privilege('powerbin_storage', 'public.pairing_sessions', 'SELECT') OR has_table_privilege('powerbin_storage', 'public.items', 'SELECT')"]);
+  assert.equal(storageAccess, 'f', 'Storage role cannot read application tables');
+  console.log('PASS: shared database keeps bucket storage private and publishes only public.devices and public.items');
   await checkSite(apiOrigin);
 
   const device = { device_id: randomUUID(), device_token: randomBytes(32).toString('base64url'), name: 'Release smoke', public_key: 'smoke-public-key', shared_key_envelope: 'smoke-envelope', admission: 'smoke-admission' };

@@ -79,6 +79,15 @@ This serves the app, guest links, and API from one origin. For links created in
 the native app to point here, set `WEB_ORIGIN` to `http://localhost:18088` in
 `.env` and rebuild the native app. App builds embed only the public API/web URLs.
 
+## Deploy on Railway
+
+The [Railway setup](railway/README.md) describes the four-service template and
+prebuilt images. For a custom domain, also configure `ALLOWED_ORIGINS` and
+redeploy the `powerbin` service. DNS and Railway networking alone do not update
+the app's origin allowlist. Follow the
+[custom-domain steps](railway/README.md#custom-domains) to preserve the JWT issuer
+and verify browser JavaScript requests.
+
 ## Command-line recipients
 
 Reveal a one-use guest link with Node.js 22.12 or later:
