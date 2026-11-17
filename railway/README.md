@@ -20,13 +20,15 @@ stack still uses separate source and storage databases.
 ## Publish images with GitHub Actions
 
 [publish-images.yml](../.github/workflows/publish-images.yml) runs on pull requests
-targeting `master`, pushes to `master` (including merges), and manual runs on
-`master`. It installs standalone pnpm, runs `pnpm test`, builds all three custom
-images for `linux/amd64`, caches build layers, and runs the disposable
-[release smoke check](smoke.mjs) against them. Pull requests
-validate without publishing. After a successful `master` check, a separate job
-publishes the exact tested images using GitHub's built-in `GITHUB_TOKEN`; no PAT or
-Railway credentials are needed. Actions are pinned to commit SHAs.
+targeting `master`, pushes to `master` (including merges), and manual runs.
+Every run installs standalone pnpm and runs `pnpm test`.
+Pull requests and manual runs on other branches run only these unit tests.
+Pushes and manual runs on `master` also build all three custom images for
+`linux/amd64`, cache build layers, and run the disposable
+[release smoke check](smoke.mjs) against them. After a successful `master` check,
+a separate job publishes the exact tested images using GitHub's built-in
+`GITHUB_TOKEN`; no PAT or Railway credentials are needed. Actions are pinned to
+commit SHAs.
 
 | Railway service | GHCR image | Dockerfile |
 | --- | --- | --- |
