@@ -60,9 +60,9 @@ export function Field(props: { label: string; placeholder: string; field: FieldN
   </View>;
 }
 
-export function Action(props: { label: string; state: State; primary?: boolean; destructive?: boolean; action: ActionName; id?: string }) {
+export function Action(props: { label: string; state: State; primary?: boolean; destructive?: boolean; disabled?: boolean; action: ActionName; id?: string }) {
   return <Button
-    disabled={props.state().busy}
+    disabled={props.state().busy || props.disabled}
     onPress={() => dispatch(props.action, props.id)}
     style={{
       minHeight: 44, paddingHorizontal: 16, paddingVertical: 12, borderRadius: 2,

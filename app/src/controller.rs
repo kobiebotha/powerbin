@@ -49,6 +49,7 @@ pub enum Action {
     Burn(String),
     Reveal,
     CopyOutput,
+    CopyPairingUrl,
 }
 
 #[derive(Clone)]
@@ -238,6 +239,18 @@ impl Controller {
                     .and_then(|g| g.revealed)
                     .unwrap_or_else(|| self.ui.output.get());
                 crate::platform::copy(&value).await
+            }
+            Action::CopyPairingUrl => {
+                let url = crate::platform::pairing_url();
+                if url.is_empty() {
+                    return Err(
+                        "Pairing URL unavailable. Open your PowerBin website on the other device."
+                            .into(),
+                    );
+                }
+                crate::platform::copy(&url).await?;
+                self.ui.status.set("Pairing URL copied".into());
+                Ok(())
             }
         }
     }

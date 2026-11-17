@@ -50,6 +50,41 @@ export function Setup(props: { state: State }) {
   </View>;
 }
 
+export function AddDevice(props: { state: State; first?: boolean }) {
+  return <View style={{ gap: 18 }}>
+    <If when={props.first}>
+      <Heading title="Pair another device to start sending."
+        subtitle="Your snippets need somewhere to go. Connect a second device to send between them." />
+    </If>
+    <If when={!props.state().pairing}>
+      <Panel style={{ borderColor: props.first ? color.accent : color.line }}>
+        <If when={!props.first}>
+          <Text style={{ ...mono, fontSize: 17, fontWeight: "600", color: color.ink }}>Add a device.</Text>
+        </If>
+        <Text style={{ ...small, lineHeight: 20 }}>
+          {props.state().pairingUrl
+            ? "1. Open this address on your other device and choose Pair this device."
+            : "1. Open your PowerBin site on your other device and choose Pair this device."}
+        </Text>
+        <If when={props.state().pairingUrl.length > 0}>
+          <View style={{ gap: 12 }}>
+            <Text style={{ ...mono, fontSize: 14, color: color.accent }}>{props.state().pairingUrl}</Text>
+            <View style={row}>
+              <Action label="Copy pairing URL" state={props.state} action="copyPairingUrl" />
+            </View>
+          </View>
+        </If>
+        <Text style={{ ...small, lineHeight: 20 }}>2. Enter the code shown on that device, then compare fingerprints on both devices.</Text>
+        <Field label="Pairing code" placeholder="ABCDE-12345" field="code" state={props.state} />
+        <View style={row}>
+          <Action label="Find device" state={props.state} primary action="approveCode" />
+        </View>
+      </Panel>
+    </If>
+    <Pairing state={props.state} />
+  </View>;
+}
+
 export function Devices(props: { state: State }) {
   const unpairing = signal("");
   const renaming = signal("");
@@ -62,7 +97,7 @@ export function Devices(props: { state: State }) {
   });
   return <View style={{ gap: 18 }}>
     <Heading title="Trusted devices." subtitle="Only devices you pair can read your private snippets." />
-    <Pairing state={props.state} />
+    <AddDevice state={props.state} />
     <Each of={props.state().devices} key={(device) => device.id}>
       {(device) => <Panel style={{ gap: 8 }}>
         <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -134,13 +169,5 @@ export function Devices(props: { state: State }) {
         </If>
       </Panel>}
     </Each>
-    <If when={!props.state().pairing}>
-      <Panel>
-        <Text style={{ ...mono, fontSize: 17, fontWeight: "600", color: color.ink }}>Add a device.</Text>
-        <Text style={{ ...mono, fontSize: 13, color: color.muted }}>On the new device, choose Pair this device. Enter its code here.</Text>
-        <Field label="Pairing code" placeholder="ABCDE-12345" field="code" state={props.state} />
-        <Action label="Find device" state={props.state} primary action="approveCode" />
-      </Panel>
-    </If>
   </View>;
 }
