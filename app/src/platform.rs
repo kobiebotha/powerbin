@@ -76,6 +76,34 @@ pub fn web_origin() -> String {
     option_env!("POWERBIN_WEB_ORIGIN").unwrap_or("").into()
 }
 
+/// The public app address is display-only; pairing still requires the code
+/// exchange and fingerprint comparison on both devices.
+pub fn pairing_url() -> String {
+    #[cfg(target_arch = "wasm32")]
+    let source = web_sys::window().and_then(|window| window.location().href().ok());
+    #[cfg(not(target_arch = "wasm32"))]
+    let source = option_env!("POWERBIN_WEB_ORIGIN").map(str::to_owned);
+    clean_pairing_url(source.as_deref())
+}
+
+fn clean_pairing_url(value: Option<&str>) -> String {
+    let Some(mut url) = value.and_then(|value| reqwest::Url::parse(value.trim()).ok()) else {
+        return String::new();
+    };
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return String::new();
+    }
+    // Never include a guest link, its decryption key, or another page's query
+    // parameters in the address shared with a new device.
+    url.set_query(None);
+    url.set_fragment(None);
+    url.into()
+}
+
 pub fn guest_link() -> Option<(String, String)> {
     #[cfg(target_arch = "wasm32")]
     {
@@ -102,4 +130,48 @@ pub fn guest_link() -> Option<(String, String)> {
     }
     #[cfg(not(target_arch = "wasm32"))]
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::clean_pairing_url;
+
+    #[test]
+    fn pairing_url_uses_the_actual_custom_domain_and_preserves_the_app_path() {
+        assert_eq!(
+            clean_pairing_url(Some("https://CUSTOM.example:443/powerbin/index.html")),
+            "https://custom.example/powerbin/index.html"
+        );
+        assert_eq!(
+            clean_pairing_url(Some("http://localhost:8080")),
+            "http://localhost:8080/"
+        );
+    }
+
+    #[test]
+    fn pairing_url_strips_query_and_fragment_secrets() {
+        assert_eq!(
+            clean_pairing_url(Some(
+                "https://relay.example/app/?link=guest&other=value#secret-key"
+            )),
+            "https://relay.example/app/"
+        );
+    }
+
+    #[test]
+    fn pairing_url_requires_a_configured_http_address_without_credentials() {
+        for value in [
+            None,
+            Some(""),
+            Some(" "),
+            Some("relay.example"),
+            Some("file:///app/index.html"),
+            Some("javascript:alert(1)"),
+            Some("ftp://relay.example/"),
+            Some("https://user:password@relay.example/"),
+            Some("https://user@relay.example/"),
+        ] {
+            assert!(clean_pairing_url(value).is_empty(), "{value:?}");
+        }
+    }
 }

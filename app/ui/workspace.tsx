@@ -1,7 +1,7 @@
 import { computed, Text, View } from "nsh";
 import { Button, Input, Tab, Tabs } from "nsh/base";
 import { Action, color, focus, mono, Panel, row, setField, small, timestamp, type State } from "./components";
-import { Devices } from "./pairing";
+import { AddDevice, Devices } from "./pairing";
 
 const tabs = [
   { key: "send", label: "Send" }, { key: "inbox", label: "Inbox" },
@@ -34,6 +34,7 @@ export function Workspace(props: { state: State }) {
 function Composer(props: { state: State }) {
   const devices = computed(() => props.state().devices.filter((device) => device.id !== props.state().session?.deviceId));
   return <View style={{ gap: 18 }}>
+    <If when={devices().length === 0}><AddDevice state={props.state} first /></If>
     <Panel>
       <Input
         accessibilityLabel="Snippet" multiline value={props.state().draft}
@@ -46,26 +47,25 @@ function Composer(props: { state: State }) {
         }}
         focusStyle={{ borderColor: color.accent }}
       />
-      <Text style={small}>select a device to send to. no selection sends to all by default.</Text>
-      <View style={row}>
-        <Each of={devices()} key={(device) => device.id}>
-          {(device) => <Button
-            selected={props.state().recipient === device().id}
-            onPress={() => setField("recipient", props.state().recipient === device().id ? "" : device().id)}
-            style={{
-              minHeight: 40, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 2, borderWidth: 1,
-              backgroundColor: props.state().recipient === device().id ? color.accentSoft : color.field,
-              borderColor: props.state().recipient === device().id ? color.accent : color.line,
-            }} hoverStyle={{ borderColor: color.accent }} focusStyle={focus}>
-            <Text style={{ ...mono, fontSize: 12, color: props.state().recipient === device().id ? color.accent : color.ink }}>{device().name}</Text>
-          </Button>}
-        </Each>
-      </View>
-      <If when={devices().length === 0}>
-        <Text style={small}>Pair another device in Devices to start sending.</Text>
+      <If when={devices().length > 0}>
+        <Text style={small}>Select a device, or leave all unselected to send to every paired device.</Text>
+        <View style={row}>
+          <Each of={devices()} key={(device) => device.id}>
+            {(device) => <Button
+              selected={props.state().recipient === device().id}
+              onPress={() => setField("recipient", props.state().recipient === device().id ? "" : device().id)}
+              style={{
+                minHeight: 40, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 2, borderWidth: 1,
+                backgroundColor: props.state().recipient === device().id ? color.accentSoft : color.field,
+                borderColor: props.state().recipient === device().id ? color.accent : color.line,
+              }} hoverStyle={{ borderColor: color.accent }} focusStyle={focus}>
+              <Text style={{ ...mono, fontSize: 12, color: props.state().recipient === device().id ? color.accent : color.ink }}>{device().name}</Text>
+            </Button>}
+          </Each>
+        </View>
       </If>
       <View style={row}>
-        <Action label="Send" state={props.state} primary action="send" />
+        <Action label="Send" state={props.state} primary disabled={devices().length === 0} action="send" />
         <Action label="Save for later" state={props.state} action="save" />
         <Action label="Create one-time link" state={props.state} action="createLink" />
       </View>

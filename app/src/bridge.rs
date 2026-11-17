@@ -52,6 +52,7 @@ pub struct UiState {
     pub pairing: Option<crate::model::PairingView>,
     pub guest: Option<crate::model::GuestView>,
     pub output: String,
+    pub pairing_url: String,
 }
 
 type Listener = Rc<RefCell<Option<Callback<UiState>>>>;
@@ -244,6 +245,7 @@ pub enum CommandName {
     Burn,
     Reveal,
     CopyOutput,
+    CopyPairingUrl,
 }
 
 impl CommandName {
@@ -270,6 +272,7 @@ impl CommandName {
             Self::Burn => Action::Burn(id.ok_or("Missing item id")?),
             Self::Reveal => Action::Reveal,
             Self::CopyOutput => Action::CopyOutput,
+            Self::CopyPairingUrl => Action::CopyPairingUrl,
         })
     }
 }
@@ -337,6 +340,7 @@ fn snapshot(controller: &Controller) -> UiState {
         pairing: ui.pairing.get(),
         guest: ui.guest.get(),
         output: ui.output.get(),
+        pairing_url: crate::platform::pairing_url(),
     }
 }
 
